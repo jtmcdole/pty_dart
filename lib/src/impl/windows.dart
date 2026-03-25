@@ -11,7 +11,7 @@ import 'package:win32/win32.dart' as win32;
 class _NamedPipe {
   _NamedPipe({bool nowait = false}) {
     final pipeName = r'\\.\pipe\dart-pty-pipe';
-    final pPipeName = pipeName.toNativeUtf16();
+    final pPipeName = pipeName.toPcwstr();
 
     final waitMode = nowait ? win32.PIPE_NOWAIT : win32.PIPE_WAIT;
 
@@ -33,24 +33,24 @@ class _NamedPipe {
     final namedPipeClient = win32.CreateFile(
       pPipeName,
       win32.GENERIC_READ | win32.GENERIC_WRITE,
-      0, // no sharing
+      win32.FILE_SHARE_NONE, // no sharing
       nullptr, // default security attributes
       win32.OPEN_EXISTING, // opens existing pipe ,
-      0, // default attributes
-      0, // no template file
+      win32.FILE_FLAGS_AND_ATTRIBUTES(0), // default attributes
+      null, // no template file
     );
     calloc.free(pPipeName);
 
-    if (namedPipeClient == win32.INVALID_HANDLE_VALUE) {
+    if (namedPipeClient.error != win32.ERROR_SUCCESS) {
       throw PtyException('CreateFile on named pipe failed');
     }
 
     readSide = namedPipe;
-    writeSide = namedPipeClient;
+    writeSide = namedPipeClient.value;
   }
 
-  late final int readSide;
-  late final int writeSide;
+  late final win32.HANDLE readSide;
+  late final win32.HANDLE writeSide;
 }
 
 class PtyCoreWindows implements PtyCore {
@@ -62,14 +62,22 @@ class PtyCoreWindows implements PtyCore {
     bool blocking = false,
   }) {
     // create input pipe
-    final hReadPipe = calloc<IntPtr>();
-    final hWritePipe = calloc<IntPtr>();
-    final pipe2 = win32.CreatePipe(hReadPipe, hWritePipe, nullptr, 512);
-    if (pipe2 == win32.INVALID_HANDLE_VALUE) {
+    final phRead = calloc<IntPtr>();
+    final phWrite = calloc<IntPtr>();
+
+    final pipe2 = win32.CreatePipe(
+      phRead.cast<win32.HANDLE>(),
+      phWrite.cast<win32.HANDLE>(),
+      nullptr,
+      512,
+    );
+    if (pipe2.error != win32.ERROR_SUCCESS) {
       throw PtyException('CreatePipe failed: ${win32.GetLastError()}');
     }
-    final inputWriteSide = hWritePipe.value;
-    final inputReadSide = hReadPipe.value;
+    final inputWriteSide = win32.HANDLE(
+      Pointer.fromAddress(phWrite.value),
+    ); //hWritePipe.value.cast<win32.HANDLE>();
+    final inputReadSide = win32.HANDLE(Pointer.fromAddress(phRead.value));
 
     // create output pipe
     final pipe1 = _NamedPipe(nowait: !blocking);
@@ -81,19 +89,17 @@ class PtyCoreWindows implements PtyCore {
     // final inputReadSide = pipe2.readSide;
 
     // create pty
-    final _hPty = calloc<IntPtr>();
     final size = calloc<win32.COORD>().ref;
     size.X = 80;
     size.Y = 25;
-    final hr = win32.CreatePseudoConsole(
+    final hpty = win32.CreatePseudoConsole(
       size,
       inputReadSide,
       outputWriteSide,
       0,
-      _hPty,
     );
 
-    if (win32.FAILED(hr)) {
+    if (!hpty.isValid) {
       throw PtyException('CreatePseudoConsole failed.');
     }
 
@@ -103,28 +109,36 @@ class PtyCoreWindows implements PtyCore {
 
     // Explicitly set stdio of the child process to NULL. This is required for
     // ConPTY to work properly.
-    si.ref.StartupInfo.hStdInput = nullptr.address;
-    si.ref.StartupInfo.hStdOutput = nullptr.address;
-    si.ref.StartupInfo.hStdError = nullptr.address;
+    si.ref.StartupInfo.hStdInput = win32.HANDLE(nullptr);
+    si.ref.StartupInfo.hStdOutput = win32.HANDLE(nullptr);
+    si.ref.StartupInfo.hStdError = win32.HANDLE(nullptr);
     si.ref.StartupInfo.dwFlags = win32.STARTF_USESTDHANDLES;
 
     final bytesRequired = calloc<IntPtr>();
-    win32.InitializeProcThreadAttributeList(nullptr, 1, 0, bytesRequired);
-    si.ref.lpAttributeList = calloc<Int8>(bytesRequired.value);
+    win32.InitializeProcThreadAttributeList(null, 1, bytesRequired);
+    final lpAttributeListPtr = calloc<Int8>(bytesRequired.value);
+    si.ref.lpAttributeList = win32.LPPROC_THREAD_ATTRIBUTE_LIST(
+      lpAttributeListPtr,
+    );
 
     var ret = win32.InitializeProcThreadAttributeList(
-        si.ref.lpAttributeList, 1, 0, bytesRequired);
+      si.ref.lpAttributeList,
+      1,
+      bytesRequired,
+    );
 
     if (ret == win32.FALSE) {
       throw PtyException('InitializeProcThreadAttributeList failed.');
     }
 
     // use pty
+    final pPtyAttr = calloc<IntPtr>();
+    pPtyAttr.value = hpty;
     ret = win32.UpdateProcThreadAttribute(
       si.ref.lpAttributeList,
       0,
       win32.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-      Pointer.fromAddress(_hPty.value),
+      pPtyAttr.cast<Void>(),
       sizeOf<IntPtr>(),
       nullptr,
       nullptr,
@@ -143,12 +157,13 @@ class PtyCoreWindows implements PtyCore {
         commandBuffer.write(argument);
       }
     }
-    final pCommandLine = commandBuffer.toString().toNativeUtf16();
+
+    final pwstrCommandLine = '$commandBuffer'.toPwstr();
 
     // build current directory
-    Pointer<Utf16> pCurrentDirectory = nullptr;
+    win32.PCWSTR? pwstrCurrentDirectory;
     if (workingDirectory != null) {
-      pCurrentDirectory = workingDirectory.toNativeUtf16();
+      pwstrCurrentDirectory = workingDirectory.toPcwstr();
     }
 
     // build environment
@@ -162,36 +177,37 @@ class PtyCoreWindows implements PtyCore {
         buffer.write(env.value);
         buffer.write('\u0000');
       }
-
+      buffer.write('\u0000');
       pEnvironment = buffer.toString().toNativeUtf16();
     }
 
     // start the process.
     final pi = calloc<win32.PROCESS_INFORMATION>();
     ret = win32.CreateProcess(
+      null,
+      pwstrCommandLine,
       nullptr,
-      pCommandLine,
       nullptr,
-      nullptr,
-      win32.FALSE,
+      false,
       win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
       // pass pEnvironment here causes crash
       // TODO: fix this
-      // pEnvironment,
-      nullptr,
-      pCurrentDirectory,
+      pEnvironment, // must be null terminated block of null terminated strings
+      // nullptr, // lpEnvironment: inherit
+      pwstrCurrentDirectory,
       si.cast(),
       pi,
     );
 
-    calloc.free(pCommandLine);
-
-    if (pCurrentDirectory != nullptr) {
-      calloc.free(pCurrentDirectory);
-    }
-
-    if (pEnvironment != nullptr) {
-      calloc.free(pEnvironment);
+    final freeme = [
+      pwstrCommandLine,
+      ?pwstrCurrentDirectory,
+      pEnvironment,
+      lpAttributeListPtr,
+      bytesRequired,
+    ];
+    for (var ptr in freeme) {
+      calloc.free(ptr);
     }
 
     if (ret == 0) {
@@ -201,7 +217,7 @@ class PtyCoreWindows implements PtyCore {
     return PtyCoreWindows._(
       inputWriteSide,
       outputReadSide,
-      _hPty.value,
+      hpty,
       pi.ref.hProcess,
     );
   }
@@ -213,21 +229,20 @@ class PtyCoreWindows implements PtyCore {
     this._hProcess,
   );
 
-  final int _inputWriteSide;
-  final int _outputReadSide;
-  final int _hPty;
-  final int _hProcess;
+  final win32.HANDLE _inputWriteSide;
+  final win32.HANDLE _outputReadSide;
+  final win32.HPCON _hPty;
+  final win32.HANDLE _hProcess;
 
   static const _bufferSize = 4096;
-  final _buffer = calloc<Int8>(_bufferSize + 1).address;
+  final _buffer = calloc<Uint8>(_bufferSize + 1);
 
   @override
   Uint8List? read() {
     final pReadlen = calloc<Uint32>();
-    final buffer = Pointer.fromAddress(_buffer);
     final ret = win32.ReadFile(
       _outputReadSide,
-      buffer,
+      _buffer,
       _bufferSize,
       pReadlen,
       nullptr,
@@ -236,15 +251,14 @@ class PtyCoreWindows implements PtyCore {
     final readlen = pReadlen.value;
     calloc.free(pReadlen);
 
-    if (ret == 0) {
+    if (!ret.value) {
       return null;
     }
 
     if (readlen <= 0) {
       return null;
-    } else {
-      return buffer.cast<Uint8>().asTypedList(readlen);
     }
+    return Uint8List.fromList(_buffer.cast<Uint8>().asTypedList(readlen));
   }
 
   @override
@@ -268,9 +282,15 @@ class PtyCoreWindows implements PtyCore {
     const n = 1;
     final pid = calloc<IntPtr>(n);
     final infinite = 0xFFFFFFFF;
-    pid.elementAt(0).value = _hProcess;
-    win32.MsgWaitForMultipleObjects(n, pid, 1, infinite, win32.QS_ALLEVENTS);
-    return pid.elementAt(0).value;
+    (pid + 0).value = _hProcess.address;
+    win32.MsgWaitForMultipleObjects(
+      n,
+      pid.cast<Pointer<Pointer>>(),
+      true,
+      infinite,
+      win32.QS_ALLEVENTS,
+    );
+    return (pid + 0).value;
   }
 
   @override
@@ -285,8 +305,9 @@ class PtyCoreWindows implements PtyCore {
     final size = calloc<win32.COORD>();
     size.ref.X = width;
     size.ref.Y = height;
-    final hr = win32.ResizePseudoConsole(_hPty, size.ref);
-    if (win32.FAILED(hr)) {
+    try {
+      win32.ResizePseudoConsole(_hPty, size.ref);
+    } catch (e) {
       throw PtyException('ResizePseudoConsole failed.');
     }
     calloc.free(size);
@@ -299,7 +320,7 @@ class PtyCoreWindows implements PtyCore {
 
   @override
   void write(List<int> data) {
-    final buffer = calloc<Int8>(data.length);
+    final buffer = calloc<Uint8>(data.length);
     buffer.asTypedList(data.length).setAll(0, data);
     final written = calloc<Uint32>();
     win32.WriteFile(_inputWriteSide, buffer, data.length, written, nullptr);

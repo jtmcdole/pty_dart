@@ -1,15 +1,14 @@
 name: pty
 description: Pty for Dart and Flutter. Provides the ability to create processes with pseudo terminal file descriptors.
-version: 0.2.2-pre
+version: 0.3.0
 homepage: https://github.com/TerminalStudio/pty
 
 environment:
-  sdk: '>=2.12.0 <3.0.0'
+  sdk: '>=3.11.0 <4.0.0'
 
 dependencies:
-  win32: ^2.1.0
-  ffi: ^1.0.0
+  win32: ^6.0.0
+  ffi: ^2.2.0
 
 dev_dependencies:
-  pedantic: ^1.10.0
-  test: ^1.16.4
+  test: ^1.17.0
