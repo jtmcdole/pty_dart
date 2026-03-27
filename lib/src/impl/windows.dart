@@ -69,11 +69,17 @@ class PtyCoreWindows implements PtyCore {
       final phRead = arena<IntPtr>();
       final phWrite = arena<IntPtr>();
 
+      // 2. Setup Security Attributes so the child process can actually use the pipe
+      final lpPipeAttributes = arena<win32.SECURITY_ATTRIBUTES>();
+      lpPipeAttributes.ref.nLength = sizeOf<win32.SECURITY_ATTRIBUTES>();
+      lpPipeAttributes.ref.bInheritHandle = true;
+      // lpPipeAttributes.ref.lpSecurityDescriptor = nullptr;
+
       final pipe2Result = win32.CreatePipe(
         phRead.cast<win32.HANDLE>(),
         phWrite.cast<win32.HANDLE>(),
-        null,
-        512,
+        lpPipeAttributes,
+        0,
       );
       if (!pipe2Result.value) {
         throw PtyException('CreatePipe failed: ${pipe2Result.error}');
@@ -107,10 +113,10 @@ class PtyCoreWindows implements PtyCore {
 
       // Explicitly set stdio of the child process to NULL. This is required for
       // ConPTY to work properly.
-      si.ref.StartupInfo.hStdInput = win32.HANDLE(nullptr);
-      si.ref.StartupInfo.hStdOutput = win32.HANDLE(nullptr);
-      si.ref.StartupInfo.hStdError = win32.HANDLE(nullptr);
-      si.ref.StartupInfo.dwFlags = win32.STARTF_USESTDHANDLES;
+      // si.ref.StartupInfo.hStdInput = win32.HANDLE(nullptr);
+      // si.ref.StartupInfo.hStdOutput = win32.HANDLE(nullptr);
+      // si.ref.StartupInfo.hStdError = win32.HANDLE(nullptr);
+      // si.ref.StartupInfo.dwFlags = win32.STARTF_USESTDHANDLES;
 
       final bytesRequired = arena<IntPtr>();
       win32.InitializeProcThreadAttributeList(null, 1, bytesRequired);
@@ -191,9 +197,9 @@ class PtyCoreWindows implements PtyCore {
         null,
         false,
         win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
-        //pEnvironment,
-        null,
-        pwstrCurrentDirectory,
+
+        null, //pEnvironment, - inherit. need read environment to modify.
+        null, //pwstrCurrentDirectory,
         si.cast(),
         pi,
       );

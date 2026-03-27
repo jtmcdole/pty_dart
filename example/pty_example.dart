@@ -8,7 +8,10 @@ void main() async {
   //   r'C:\Users\john\AppData\Roaming\npm\gemini.ps1',
   // ]);
 
-  final pty = PseudoTerminal.start('cmd.exe', []);
+  final pty = PseudoTerminal.start(
+    r'C:\Program Files\PowerShell\7\pwsh.exe',
+    [],
+  );
   pty.out.listen(
     (data) {
       print('hmmm: $data');
@@ -20,6 +23,8 @@ void main() async {
       print('sup, err? $e');
     },
   );
+
+  pty.write('dir\r\n');
 
   await Future.delayed(Duration(seconds: 5));
 
