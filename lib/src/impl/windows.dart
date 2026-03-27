@@ -10,43 +10,46 @@ import 'package:win32/win32.dart' as win32;
 
 class _NamedPipe {
   _NamedPipe({bool nowait = false}) {
-    final pipeName = r'\\.\pipe\dart-pty-pipe';
-    final pPipeName = pipeName.toPcwstr();
+    using((arena) {
+      final pipeName = r'\\.\pipe\dart-pty-pipe';
+      final pPipeName = pipeName.toPcwstr(allocator: arena);
 
-    final waitMode = nowait ? win32.PIPE_NOWAIT : win32.PIPE_WAIT;
+      final waitMode = nowait ? win32.PIPE_NOWAIT : win32.PIPE_WAIT;
 
-    final namedPipe = win32.CreateNamedPipe(
-      pPipeName,
-      win32.PIPE_ACCESS_DUPLEX,
-      waitMode | win32.PIPE_READMODE_MESSAGE | win32.PIPE_TYPE_MESSAGE,
-      win32.PIPE_UNLIMITED_INSTANCES,
-      4096,
-      4096,
-      0,
-      nullptr,
-    );
+      final namedPipe = win32.CreateNamedPipe(
+        pPipeName,
+        win32.PIPE_ACCESS_DUPLEX,
+        waitMode | win32.PIPE_READMODE_MESSAGE | win32.PIPE_TYPE_MESSAGE,
+        win32.PIPE_UNLIMITED_INSTANCES,
+        4096,
+        4096,
+        0,
+        nullptr,
+      );
 
-    if (namedPipe == win32.INVALID_HANDLE_VALUE) {
-      throw PtyException('CreateNamedPipe failed: ${win32.GetLastError()}');
-    }
+      if (!namedPipe.isValid) {
+        throw PtyException('CreateNamedPipe failed: $namedPipe');
+      }
 
-    final namedPipeClient = win32.CreateFile(
-      pPipeName,
-      win32.GENERIC_READ | win32.GENERIC_WRITE,
-      win32.FILE_SHARE_NONE, // no sharing
-      nullptr, // default security attributes
-      win32.OPEN_EXISTING, // opens existing pipe ,
-      win32.FILE_FLAGS_AND_ATTRIBUTES(0), // default attributes
-      null, // no template file
-    );
-    calloc.free(pPipeName);
+      final namedPipeClient = win32.CreateFile(
+        pPipeName,
+        win32.GENERIC_READ | win32.GENERIC_WRITE,
+        win32.FILE_SHARE_NONE, // no sharing
+        nullptr, // default security attributes
+        win32.OPEN_EXISTING, // opens existing pipe
+        win32.FILE_FLAGS_AND_ATTRIBUTES(0), // default attributes
+        null, // no template file
+      );
 
-    if (namedPipeClient.error != win32.ERROR_SUCCESS) {
-      throw PtyException('CreateFile on named pipe failed');
-    }
+      if (namedPipeClient.error != win32.ERROR_SUCCESS) {
+        throw PtyException(
+          'CreateFile on named pipe failed: ${namedPipeClient.error}',
+        );
+      }
 
-    readSide = namedPipe;
-    writeSide = namedPipeClient.value;
+      readSide = namedPipe;
+      writeSide = namedPipeClient.value;
+    });
   }
 
   late final win32.HANDLE readSide;
@@ -61,165 +64,147 @@ class PtyCoreWindows implements PtyCore {
     Map<String, String>? environment,
     bool blocking = false,
   }) {
-    // create input pipe
-    final phRead = calloc<IntPtr>();
-    final phWrite = calloc<IntPtr>();
+    return using((arena) {
+      // create input pipe
+      final phRead = arena<IntPtr>();
+      final phWrite = arena<IntPtr>();
 
-    final pipe2 = win32.CreatePipe(
-      phRead.cast<win32.HANDLE>(),
-      phWrite.cast<win32.HANDLE>(),
-      nullptr,
-      512,
-    );
-    if (pipe2.error != win32.ERROR_SUCCESS) {
-      throw PtyException('CreatePipe failed: ${win32.GetLastError()}');
-    }
-    final inputWriteSide = win32.HANDLE(
-      Pointer.fromAddress(phWrite.value),
-    ); //hWritePipe.value.cast<win32.HANDLE>();
-    final inputReadSide = win32.HANDLE(Pointer.fromAddress(phRead.value));
-
-    // create output pipe
-    final pipe1 = _NamedPipe(nowait: !blocking);
-    final outputReadSide = pipe1.readSide;
-    final outputWriteSide = pipe1.writeSide;
-
-    // final pipe2 = _NamedPipe(nowait: false);
-    // final inputWriteSide = pipe2.writeSide;
-    // final inputReadSide = pipe2.readSide;
-
-    // create pty
-    final size = calloc<win32.COORD>().ref;
-    size.X = 80;
-    size.Y = 25;
-    final hpty = win32.CreatePseudoConsole(
-      size,
-      inputReadSide,
-      outputWriteSide,
-      0,
-    );
-
-    if (!hpty.isValid) {
-      throw PtyException('CreatePseudoConsole failed.');
-    }
-
-    // Setup startup info
-    final si = calloc<win32.STARTUPINFOEX>();
-    si.ref.StartupInfo.cb = sizeOf<win32.STARTUPINFOEX>();
-
-    // Explicitly set stdio of the child process to NULL. This is required for
-    // ConPTY to work properly.
-    si.ref.StartupInfo.hStdInput = win32.HANDLE(nullptr);
-    si.ref.StartupInfo.hStdOutput = win32.HANDLE(nullptr);
-    si.ref.StartupInfo.hStdError = win32.HANDLE(nullptr);
-    si.ref.StartupInfo.dwFlags = win32.STARTF_USESTDHANDLES;
-
-    final bytesRequired = calloc<IntPtr>();
-    win32.InitializeProcThreadAttributeList(null, 1, bytesRequired);
-    final lpAttributeListPtr = calloc<Int8>(bytesRequired.value);
-    si.ref.lpAttributeList = win32.LPPROC_THREAD_ATTRIBUTE_LIST(
-      lpAttributeListPtr,
-    );
-
-    var ret = win32.InitializeProcThreadAttributeList(
-      si.ref.lpAttributeList,
-      1,
-      bytesRequired,
-    );
-
-    if (ret == win32.FALSE) {
-      throw PtyException('InitializeProcThreadAttributeList failed.');
-    }
-
-    // use pty
-    final pPtyAttr = calloc<IntPtr>();
-    pPtyAttr.value = hpty;
-    ret = win32.UpdateProcThreadAttribute(
-      si.ref.lpAttributeList,
-      0,
-      win32.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-      pPtyAttr.cast<Void>(),
-      sizeOf<IntPtr>(),
-      nullptr,
-      nullptr,
-    );
-
-    if (ret == win32.FALSE) {
-      throw PtyException('UpdateProcThreadAttribute failed.');
-    }
-
-    // build command line
-    final commandBuffer = StringBuffer();
-    commandBuffer.write(executable);
-    if (arguments.isNotEmpty) {
-      for (var argument in arguments) {
-        commandBuffer.write(' ');
-        commandBuffer.write(argument);
+      final pipe2Result = win32.CreatePipe(
+        phRead.cast<win32.HANDLE>(),
+        phWrite.cast<win32.HANDLE>(),
+        nullptr,
+        512,
+      );
+      if (!pipe2Result.value) {
+        throw PtyException('CreatePipe failed: ${pipe2Result.error}');
       }
-    }
+      final inputWriteSide = win32.HANDLE(Pointer.fromAddress(phWrite.value));
+      final inputReadSide = win32.HANDLE(Pointer.fromAddress(phRead.value));
 
-    final pwstrCommandLine = '$commandBuffer'.toPwstr();
+      // create output pipe
+      final pipe1 = _NamedPipe(nowait: !blocking);
+      final outputReadSide = pipe1.readSide;
+      final outputWriteSide = pipe1.writeSide;
 
-    // build current directory
-    win32.PCWSTR? pwstrCurrentDirectory;
-    if (workingDirectory != null) {
-      pwstrCurrentDirectory = workingDirectory.toPcwstr();
-    }
+      // create pty
+      final size = arena<win32.COORD>();
+      size.ref.X = 80;
+      size.ref.Y = 25;
+      final hpty = win32.CreatePseudoConsole(
+        size.ref,
+        inputReadSide,
+        outputWriteSide,
+        0,
+      );
 
-    // build environment
-    Pointer<Utf16> pEnvironment = nullptr;
-    if (environment != null && environment.isNotEmpty) {
-      final buffer = StringBuffer();
+      if (!hpty.isValid) {
+        throw PtyException('CreatePseudoConsole failed.');
+      }
 
-      for (var env in environment.entries) {
-        buffer.write(env.key);
-        buffer.write('=');
-        buffer.write(env.value);
+      // Setup startup info
+      final si = arena<win32.STARTUPINFOEX>();
+      si.ref.StartupInfo.cb = sizeOf<win32.STARTUPINFOEX>();
+
+      // Explicitly set stdio of the child process to NULL. This is required for
+      // ConPTY to work properly.
+      si.ref.StartupInfo.hStdInput = win32.HANDLE(nullptr);
+      si.ref.StartupInfo.hStdOutput = win32.HANDLE(nullptr);
+      si.ref.StartupInfo.hStdError = win32.HANDLE(nullptr);
+      si.ref.StartupInfo.dwFlags = win32.STARTF_USESTDHANDLES;
+
+      final bytesRequired = arena<IntPtr>();
+      win32.InitializeProcThreadAttributeList(null, 1, bytesRequired);
+      final lpAttributeListPtr = arena<Int8>(bytesRequired.value);
+      si.ref.lpAttributeList = win32.LPPROC_THREAD_ATTRIBUTE_LIST(
+        lpAttributeListPtr,
+      );
+
+      var ret = win32.InitializeProcThreadAttributeList(
+        si.ref.lpAttributeList,
+        1,
+        bytesRequired,
+      );
+
+      if (!ret.value) {
+        throw PtyException('InitializeProcThreadAttributeList failed.');
+      }
+
+      // use pty
+      final pPtyAttr = arena<IntPtr>();
+      pPtyAttr.value = hpty;
+      ret = win32.UpdateProcThreadAttribute(
+        si.ref.lpAttributeList,
+        0,
+        win32.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+        pPtyAttr.cast<Void>(),
+        sizeOf<IntPtr>(),
+        nullptr,
+        nullptr,
+      );
+
+      if (!ret.value) {
+        throw PtyException('UpdateProcThreadAttribute failed.');
+      }
+
+      // build command line
+      final commandBuffer = StringBuffer();
+      commandBuffer.write(executable);
+      if (arguments.isNotEmpty) {
+        for (var argument in arguments) {
+          commandBuffer.write(' ');
+          commandBuffer.write(argument);
+        }
+      }
+
+      final pwstrCommandLine = '$commandBuffer'.toPwstr(allocator: arena);
+
+      // build current directory
+      win32.PCWSTR? pwstrCurrentDirectory;
+      if (workingDirectory != null) {
+        pwstrCurrentDirectory = workingDirectory.toPcwstr(allocator: arena);
+      }
+
+      // build environment
+      Pointer<Utf16> pEnvironment = nullptr;
+      if (environment != null && environment.isNotEmpty) {
+        final buffer = StringBuffer();
+
+        for (var env in environment.entries) {
+          buffer.write(env.key);
+          buffer.write('=');
+          buffer.write(env.value);
+          buffer.write('\u0000');
+        }
         buffer.write('\u0000');
+        pEnvironment = buffer.toString().toNativeUtf16(allocator: arena);
       }
-      buffer.write('\u0000');
-      pEnvironment = buffer.toString().toNativeUtf16();
-    }
 
-    // start the process.
-    final pi = calloc<win32.PROCESS_INFORMATION>();
-    ret = win32.CreateProcess(
-      null,
-      pwstrCommandLine,
-      nullptr,
-      nullptr,
-      false,
-      win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
-      // pass pEnvironment here causes crash
-      // TODO: fix this
-      pEnvironment, // must be null terminated block of null terminated strings
-      // nullptr, // lpEnvironment: inherit
-      pwstrCurrentDirectory,
-      si.cast(),
-      pi,
-    );
+      // start the process.
+      final pi = arena<win32.PROCESS_INFORMATION>();
+      final cpResult = win32.CreateProcess(
+        null,
+        pwstrCommandLine,
+        nullptr,
+        nullptr,
+        false,
+        win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
+        pEnvironment,
+        pwstrCurrentDirectory,
+        si.cast(),
+        pi,
+      );
 
-    final freeme = [
-      pwstrCommandLine,
-      ?pwstrCurrentDirectory,
-      pEnvironment,
-      lpAttributeListPtr,
-      bytesRequired,
-    ];
-    for (var ptr in freeme) {
-      calloc.free(ptr);
-    }
+      if (!cpResult.value) {
+        throw PtyException('CreateProcess failed: ${cpResult.error}');
+      }
 
-    if (ret == 0) {
-      throw PtyException('CreateProcess failed: ${win32.GetLastError()}');
-    }
-
-    return PtyCoreWindows._(
-      inputWriteSide,
-      outputReadSide,
-      hpty,
-      pi.ref.hProcess,
-    );
+      return PtyCoreWindows._(
+        inputWriteSide,
+        outputReadSide,
+        hpty,
+        pi.ref.hProcess,
+      );
+    });
   }
 
   PtyCoreWindows._(
@@ -239,93 +224,92 @@ class PtyCoreWindows implements PtyCore {
 
   @override
   Uint8List? read() {
-    final pReadlen = calloc<Uint32>();
-    final ret = win32.ReadFile(
-      _outputReadSide,
-      _buffer,
-      _bufferSize,
-      pReadlen,
-      nullptr,
-    );
+    return using((arena) {
+      final pReadlen = arena<Uint32>();
+      final ret = win32.ReadFile(
+        _outputReadSide,
+        _buffer,
+        _bufferSize,
+        pReadlen,
+        nullptr,
+      );
 
-    final readlen = pReadlen.value;
-    calloc.free(pReadlen);
+      final readlen = pReadlen.value;
 
-    if (!ret.value) {
-      return null;
-    }
+      if (!ret.value || readlen <= 0) {
+        return null;
+      }
 
-    if (readlen <= 0) {
-      return null;
-    }
-    return Uint8List.fromList(_buffer.cast<Uint8>().asTypedList(readlen));
+      return Uint8List.fromList(_buffer.asTypedList(readlen));
+    });
   }
 
   @override
   int? exitCodeNonBlocking() {
-    final exitCodePtr = calloc<Uint32>();
-    final ret = win32.GetExitCodeProcess(_hProcess, exitCodePtr);
+    return using((arena) {
+      final exitCodePtr = arena<Uint32>();
+      final ret = win32.GetExitCodeProcess(_hProcess, exitCodePtr);
 
-    final exitCode = exitCodePtr.value;
-    calloc.free(exitCodePtr);
+      final exitCode = exitCodePtr.value;
 
-    const STILL_ACTIVE = 259;
-    if (ret == 0 || exitCode == STILL_ACTIVE) {
-      return null;
-    }
+      const STILL_ACTIVE = 259;
+      if (!ret.value || exitCode == STILL_ACTIVE) {
+        return null;
+      }
 
-    return exitCode;
+      return exitCode;
+    });
   }
 
   @override
   int exitCodeBlocking() {
-    const n = 1;
-    final pid = calloc<IntPtr>(n);
-    final infinite = 0xFFFFFFFF;
-    (pid + 0).value = _hProcess.address;
-    win32.MsgWaitForMultipleObjects(
-      n,
-      pid.cast<Pointer<Pointer>>(),
-      true,
-      infinite,
-      win32.QS_ALLEVENTS,
-    );
-    return (pid + 0).value;
+    return using((arena) {
+      final pHandles = arena<IntPtr>(1);
+      pHandles[0] = _hProcess.address;
+      const infinite = 0xFFFFFFFF;
+      win32.MsgWaitForMultipleObjects(
+        1,
+        pHandles.cast<Pointer<Pointer>>(),
+        true,
+        infinite,
+        win32.QS_ALLEVENTS,
+      );
+
+      final exitCodePtr = arena<Uint32>();
+      win32.GetExitCodeProcess(_hProcess, exitCodePtr);
+      return exitCodePtr.value;
+    });
   }
 
   @override
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
-    final ret = win32.TerminateProcess(_hProcess, nullptr.address);
+    final ret = win32.TerminateProcess(_hProcess, 0);
     win32.ClosePseudoConsole(_hPty);
-    return ret != 0;
+    return ret.value;
   }
 
   @override
   void resize(int width, int height) {
-    final size = calloc<win32.COORD>();
-    size.ref.X = width;
-    size.ref.Y = height;
-    try {
-      win32.ResizePseudoConsole(_hPty, size.ref);
-    } catch (e) {
-      throw PtyException('ResizePseudoConsole failed.');
-    }
-    calloc.free(size);
+    using((arena) {
+      final size = arena<win32.COORD>();
+      size.ref.X = width.toInt();
+      size.ref.Y = height.toInt();
+      try {
+        win32.ResizePseudoConsole(_hPty, size.ref);
+      } catch (e) {
+        throw PtyException('ResizePseudoConsole failed.');
+      }
+    });
   }
-
-  // @override
-  // int get pid {
-  //   return _hProcess;
-  // }
 
   @override
   void write(List<int> data) {
-    final buffer = calloc<Uint8>(data.length);
-    buffer.asTypedList(data.length).setAll(0, data);
-    final written = calloc<Uint32>();
-    win32.WriteFile(_inputWriteSide, buffer, data.length, written, nullptr);
-    calloc.free(buffer);
-    calloc.free(written);
+    using((arena) {
+      final buffer = arena<Uint8>(data.length);
+      buffer.asTypedList(data.length).setAll(0, data);
+      final written = arena<Uint32>();
+      win32.WriteFile(_inputWriteSide, buffer, data.length, written, nullptr);
+    });
   }
 }
 

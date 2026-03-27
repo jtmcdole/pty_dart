@@ -39,13 +39,12 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
 
   //initialize them late to avoid having any closures in the instance
   //so that this PollingPseudoTerminal can be passed to an Isolate
-  late Completer<int> _exitCode;
+  late Completer<int> _exitCode = Completer<int>();
   late StreamController<String> _out;
   bool _initialized = false;
 
   @override
   void init() {
-    _exitCode = Completer<int>();
     _out = StreamController<String>();
     _initialized = true;
     Timer.run(() {
@@ -54,7 +53,8 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
   }
 
   List<int> _createDelayMicrosecondsStepList(
-      Map<int, int> delayMicrosecondsToAmountMap) {
+    Map<int, int> delayMicrosecondsToAmountMap,
+  ) {
     final result = List<int>.empty(growable: true);
     final sortedKeys = delayMicrosecondsToAmountMap.keys.toList(growable: false)
       ..sort();
@@ -133,7 +133,8 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
         }
       }
       await Future.delayed(
-          Duration(microseconds: delayMicrosecondsSteps[delayStepIndex]));
+        Duration(microseconds: delayMicrosecondsSteps[delayStepIndex]),
+      );
     }
   }
 
@@ -179,16 +180,20 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
       }
       first = false;
     });
-    Isolate.spawn(_readUntilExit,
-        _IsolateArgs(receivePort.sendPort, _core, _syncProcessed));
+    Isolate.spawn(
+      _readUntilExit,
+      _IsolateArgs(receivePort.sendPort, _core, _syncProcessed),
+    );
   }
 
   @override
   Future<int> get exitCode async {
     final receivePort = ReceivePort();
     // ignore: unawaited_futures
-    Isolate.spawn(_waitForExitCode,
-        _IsolateArgs(receivePort.sendPort, _core, _syncProcessed));
+    Isolate.spawn(
+      _waitForExitCode,
+      _IsolateArgs(receivePort.sendPort, _core, _syncProcessed),
+    );
     return (await receivePort.first) as int;
   }
 
