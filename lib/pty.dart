@@ -36,8 +36,10 @@ abstract class PseudoTerminal {
       );
     } else {
       //add '-l' as argument for the shell to perform a login
-      arguments = List<String>.generate(arguments.length + 1,
-          (index) => index == 0 ? '-l' : arguments[index - 1]);
+      arguments = List<String>.generate(
+        arguments.length + 1,
+        (index) => index == 0 ? '-l' : arguments[index - 1],
+      );
 
       core = PtyCoreUnix.start(
         executable,
@@ -48,11 +50,13 @@ abstract class PseudoTerminal {
       );
     }
 
+    final BasePseudoTerminal pty;
     if (blocking) {
-      return BlockingPseudoTerminal(core, ackProcessed);
+      pty = BlockingPseudoTerminal(core, ackProcessed);
     } else {
-      return PollingPseudoTerminal(core);
+      pty = PollingPseudoTerminal(core);
     }
+    return pty..init();
   }
 
   void init();

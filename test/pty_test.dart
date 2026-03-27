@@ -6,7 +6,6 @@ import 'package:test/test.dart';
 void main() {
   test('Can instantiate and kill PseudoTerminal', () async {
     final pty = PseudoTerminal.start(_getShell(), []);
-    pty.init();
     pty.kill();
     await pty.exitCode;
   }, timeout: Timeout.factor(0.3));

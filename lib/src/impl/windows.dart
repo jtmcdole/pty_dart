@@ -35,7 +35,7 @@ class _NamedPipe {
         pPipeName,
         win32.GENERIC_READ | win32.GENERIC_WRITE,
         win32.FILE_SHARE_NONE, // no sharing
-        nullptr, // default security attributes
+        null, // default security attributes
         win32.OPEN_EXISTING, // opens existing pipe
         win32.FILE_FLAGS_AND_ATTRIBUTES(0), // default attributes
         null, // no template file
@@ -72,7 +72,7 @@ class PtyCoreWindows implements PtyCore {
       final pipe2Result = win32.CreatePipe(
         phRead.cast<win32.HANDLE>(),
         phWrite.cast<win32.HANDLE>(),
-        nullptr,
+        null,
         512,
       );
       if (!pipe2Result.value) {
@@ -138,8 +138,8 @@ class PtyCoreWindows implements PtyCore {
         win32.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
         pPtyAttr.cast<Void>(),
         sizeOf<IntPtr>(),
-        nullptr,
-        nullptr,
+        null,
+        null,
       );
 
       if (!ret.value) {
@@ -163,7 +163,6 @@ class PtyCoreWindows implements PtyCore {
       if (workingDirectory != null) {
         pwstrCurrentDirectory = workingDirectory.toPcwstr(allocator: arena);
       }
-
       // build environment
       Pointer<Utf16> pEnvironment = nullptr;
       if (environment != null && environment.isNotEmpty) {
@@ -175,7 +174,11 @@ class PtyCoreWindows implements PtyCore {
           buffer.write(env.value);
           buffer.write('\u0000');
         }
+        if (environment.entries.isEmpty) {
+          buffer.write('\u0000');
+        }
         buffer.write('\u0000');
+
         pEnvironment = buffer.toString().toNativeUtf16(allocator: arena);
       }
 
@@ -184,11 +187,12 @@ class PtyCoreWindows implements PtyCore {
       final cpResult = win32.CreateProcess(
         null,
         pwstrCommandLine,
-        nullptr,
-        nullptr,
+        null,
+        null,
         false,
         win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
-        pEnvironment,
+        //pEnvironment,
+        null,
         pwstrCurrentDirectory,
         si.cast(),
         pi,
@@ -231,7 +235,7 @@ class PtyCoreWindows implements PtyCore {
         _buffer,
         _bufferSize,
         pReadlen,
-        nullptr,
+        null,
       );
 
       final readlen = pReadlen.value;
@@ -308,7 +312,7 @@ class PtyCoreWindows implements PtyCore {
       final buffer = arena<Uint8>(data.length);
       buffer.asTypedList(data.length).setAll(0, data);
       final written = arena<Uint32>();
-      win32.WriteFile(_inputWriteSide, buffer, data.length, written, nullptr);
+      win32.WriteFile(_inputWriteSide, buffer, data.length, written, null);
     });
   }
 }
