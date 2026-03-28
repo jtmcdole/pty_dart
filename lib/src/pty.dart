@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:pty/pty.dart';
 import 'package:pty/src/pty_core.dart';
@@ -40,12 +41,12 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
   //initialize them late to avoid having any closures in the instance
   //so that this PollingPseudoTerminal can be passed to an Isolate
   late Completer<int> _exitCode = Completer<int>();
-  late StreamController<String> _out;
+  late StreamController<Uint8List> _out;
   bool _initialized = false;
 
   @override
   void init() {
-    _out = StreamController<String>();
+    _out = StreamController<Uint8List>();
     _initialized = true;
     Timer.run(() {
       _poll();
@@ -84,7 +85,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
 
     var exitCodeCheckNeeded = true;
 
-    final rawDataBuffer = List<int>.empty(growable: true);
+    final rawDataBuffer = <Uint8List>[];
 
     while (true) {
       if (exitCodeCheckNeeded) {
@@ -105,7 +106,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
       var data = _core.read();
       while (data != null) {
         receivedSomething = true;
-        rawDataBuffer.addAll(data);
+        rawDataBuffer.add(data);
         data = _core.read();
       }
       if (!receivedSomething) {
@@ -121,9 +122,10 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
       if (_initialized) {
         if (rawDataBuffer.isNotEmpty) {
           try {
-            final strContent = utf8.decode(rawDataBuffer);
+            for (final bytes in rawDataBuffer) {
+              _out.add(bytes);
+            }
             rawDataBuffer.clear();
-            _out.add(strContent);
           } on FormatException catch (_) {
             // FormatException is thrown when the data contains incomplete
             // UTF-8 byte sequences.
@@ -144,7 +146,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
   }
 
   @override
-  Stream<String> get out {
+  Stream<Uint8List> get out {
     return _out.stream;
   }
 
@@ -163,11 +165,11 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
 
   late SendPort _sendPort;
   final bool _syncProcessed;
-  late final StreamController<String> _outStreamController;
+  late final StreamController<Uint8List> _outStreamController;
 
   @override
   void init() {
-    _outStreamController = StreamController<String>();
+    _outStreamController = StreamController<Uint8List>();
     out = _outStreamController.stream;
 
     final receivePort = ReceivePort();
@@ -198,7 +200,7 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
   }
 
   @override
-  late Stream<String> out;
+  late Stream<Uint8List> out;
 
   @override
   void ackProcessed() {

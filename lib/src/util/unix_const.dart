@@ -5,8 +5,8 @@ import 'dart:io';
 final consts = Platform.isAndroid
     ? AndroidConst()
     : Platform.isLinux
-        ? LinuxConst()
-        : BsdConst();
+    ? LinuxConst()
+    : BsdConst();
 
 class AndroidConst extends BsdConst {
   @override

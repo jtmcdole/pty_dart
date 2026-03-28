@@ -1,6 +1,7 @@
 library pty;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:pty/src/impl/unix.dart';
 import 'package:pty/src/impl/windows.dart';
@@ -70,7 +71,7 @@ abstract class PseudoTerminal {
 
   void write(String input);
 
-  Stream<String> get out;
+  Stream<Uint8List> get out;
 
   void ackProcessed();
 
