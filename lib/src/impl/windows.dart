@@ -217,15 +217,24 @@ class PtyCoreWindows implements PtyCore {
       _buffer,
       _bufferSize,
       pReadlen,
-      nullptr,
+      null,
     );
 
     final readlen = pReadlen.value;
     win32.free(pReadlen);
-    if (!ret.value || readlen <= 0) {
+    if (readlen < 0) {
+      print('win32 read: ${(readLen: readlen)}');
       return null;
     }
-    return Uint8List.fromList(_buffer.asTypedList(readlen));
+
+    switch (ret.error) {
+      case win32.ERROR_SUCCESS:
+      case win32.ERROR_MORE_DATA:
+        return Uint8List.fromList(_buffer.asTypedList(readlen));
+      default:
+        print('win32 read: ${(error: ret.error)}');
+        return null;
+    }
   }
 
   @override

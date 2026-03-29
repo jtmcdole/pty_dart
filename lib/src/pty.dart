@@ -192,6 +192,8 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
             utf8.decode(msg as Uint8List, allowMalformed: true),
           );
           break;
+        default:
+          print('wtf happened here? ${(type: msg.runtimeType, msg: msg)}');
       }
     });
     Isolate.spawn(
@@ -262,6 +264,7 @@ void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
     final data = ctx.arg.read();
 
     if (data == null) {
+      print('data == null?');
       await input.close();
       break;
     }
