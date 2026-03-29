@@ -85,7 +85,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
 
     var exitCodeCheckNeeded = true;
 
-    final rawDataBuffer = <String>[];
+    final rawDataBuffer = <Uint8List>[];
 
     while (true) {
       if (exitCodeCheckNeeded) {
@@ -122,8 +122,9 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
       if (_initialized) {
         if (rawDataBuffer.isNotEmpty) {
           try {
-            for (final strings in rawDataBuffer) {
-              _out.add(strings);
+            for (final bytes in rawDataBuffer) {
+              final utf = utf8.decode(bytes, allowMalformed: true);
+              _out.add(utf);
             }
             rawDataBuffer.clear();
           } on FormatException catch (_) {
@@ -165,11 +166,11 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
 
   late SendPort _sendPort;
   final bool _syncProcessed;
-  late final StreamController<Uint8List> _outStreamController;
+  late final StreamController<String> _outStreamController;
 
   @override
   void init() {
-    _outStreamController = StreamController<Uint8List>();
+    _outStreamController = StreamController<String>();
     out = _outStreamController.stream;
 
     final receivePort = ReceivePort();
@@ -180,13 +181,16 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
         first = false;
         return;
       }
+
       switch (msg.runtimeType) {
         case String:
-          _outStreamController.sink.add(utf8.encode((msg as String)));
+          _outStreamController.sink.add(msg as String);
 
           break;
         case Uint8List:
-          _outStreamController.sink.add(msg);
+          _outStreamController.sink.add(
+            utf8.decode(msg as Uint8List, allowMalformed: true),
+          );
           break;
       }
     });
@@ -242,7 +246,8 @@ void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
   // event loop from working.
   final input = StreamController<List<int>>(sync: true);
 
-  input.stream.transform(utf8.decoder).listen(ctx.sendPort.send);
+  final utf8corrupt = Utf8Codec(allowMalformed: true);
+  input.stream.transform(utf8corrupt.decoder).listen(ctx.sendPort.send);
 
   final loopController = StreamController<bool>();
 

@@ -6,7 +6,7 @@ void main() async {
   pty.write('dir\r\n');
 
   pty.out.listen((data) {
-    print(String.fromCharCodes(data));
+    print(data);
   });
 
   await Future.delayed(const Duration(seconds: 1));
