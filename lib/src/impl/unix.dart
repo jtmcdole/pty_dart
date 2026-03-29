@@ -121,7 +121,7 @@ class PtyCoreUnix implements PtyCore {
   final _buffer = calloc<Int8>(_bufferSize + 1).address;
 
   @override
-  Uint8List? read() {
+  String? read() {
     final buffer = Pointer.fromAddress(_buffer);
     final readlen = unix.read(_ptm, buffer.cast(), _bufferSize);
 

@@ -65,7 +65,7 @@ class PtyCoreWindows implements PtyCore {
       hReadPipe.cast<win32.HANDLE>(),
       hWritePipe.cast<win32.HANDLE>(),
       null,
-      512,
+      0,
     );
 
     if (pipe2 == win32.INVALID_HANDLE_VALUE) {
@@ -221,6 +221,7 @@ class PtyCoreWindows implements PtyCore {
     );
 
     final readlen = pReadlen.value;
+    win32.free(pReadlen);
     if (!ret.value || readlen <= 0) {
       return null;
     }

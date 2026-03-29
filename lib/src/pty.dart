@@ -41,12 +41,12 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
   //initialize them late to avoid having any closures in the instance
   //so that this PollingPseudoTerminal can be passed to an Isolate
   late Completer<int> _exitCode = Completer<int>();
-  late StreamController<Uint8List> _out;
+  late StreamController<String> _out;
   bool _initialized = false;
 
   @override
   void init() {
-    _out = StreamController<Uint8List>();
+    _out = StreamController<String>();
     _initialized = true;
     Timer.run(() {
       _poll();
@@ -85,7 +85,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
 
     var exitCodeCheckNeeded = true;
 
-    final rawDataBuffer = <Uint8List>[];
+    final rawDataBuffer = <String>[];
 
     while (true) {
       if (exitCodeCheckNeeded) {
@@ -122,8 +122,8 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
       if (_initialized) {
         if (rawDataBuffer.isNotEmpty) {
           try {
-            for (final bytes in rawDataBuffer) {
-              _out.add(bytes);
+            for (final strings in rawDataBuffer) {
+              _out.add(strings);
             }
             rawDataBuffer.clear();
           } on FormatException catch (_) {
@@ -146,7 +146,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
   }
 
   @override
-  Stream<Uint8List> get out {
+  Stream<String> get out {
     return _out.stream;
   }
 
@@ -177,10 +177,18 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
     receivePort.listen((msg) {
       if (first) {
         _sendPort = msg;
-      } else {
-        _outStreamController.sink.add(msg);
+        first = false;
+        return;
       }
-      first = false;
+      switch (msg.runtimeType) {
+        case String:
+          _outStreamController.sink.add(utf8.encode((msg as String)));
+
+          break;
+        case Uint8List:
+          _outStreamController.sink.add(msg);
+          break;
+      }
     });
     Isolate.spawn(
       _readUntilExit,
@@ -200,7 +208,7 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
   }
 
   @override
-  late Stream<Uint8List> out;
+  late Stream<String> out;
 
   @override
   void ackProcessed() {

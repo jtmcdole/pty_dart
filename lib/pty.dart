@@ -71,7 +71,7 @@ abstract class PseudoTerminal {
 
   void write(String input);
 
-  Stream<Uint8List> get out;
+  Stream<String> get out;
 
   void ackProcessed();
 
