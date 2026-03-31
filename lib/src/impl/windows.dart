@@ -149,23 +149,25 @@ class PtyCoreWindows implements PtyCore {
     if (workingDirectory != null) {
       pwstrCurrentDirectory = workingDirectory.toPcwstr();
     }
-    //// build environment
-    // Pointer<Utf16> pEnvironment = nullptr;
-    // if (environment != null && environment.isNotEmpty) {
-    //   final buffer = StringBuffer();
-    //   for (var env in environment.entries) {
-    //     buffer.write(env.key);
-    //     buffer.write('=');
-    //     buffer.write(env.value);
-    //     buffer.write('\u0000');
-    //   }
-    //   if (environment.entries.isEmpty) {
-    //     buffer.write('\u0000');
-    //   }
-    //   buffer.write('\u0000');
 
-    //   pEnvironment = buffer.toString().toNativeUtf16();
-    // }
+    //// build environment
+    Pointer<Utf16>? pEnvironment;
+    if (environment != null && environment.isNotEmpty) {
+      final envMap = {...WinEnv().getEnvironment(), ...environment};
+
+      print('cfu test: ${envMap}');
+
+      final buffer = StringBuffer();
+      for (final MapEntry(:key, :value) in envMap.entries) {
+        buffer.write(key);
+        buffer.write('=');
+        buffer.write(value);
+        buffer.writeCharCode(0);
+      }
+      buffer.write('\u0000');
+
+      pEnvironment = '$buffer'.toNativeUtf16();
+    }
 
     // start the process.
     final pi = calloc<win32.PROCESS_INFORMATION>();
@@ -175,8 +177,8 @@ class PtyCoreWindows implements PtyCore {
       null,
       null,
       false,
-      win32.EXTENDED_STARTUPINFO_PRESENT,
-      null,
+      win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
+      pEnvironment,
       pwstrCurrentDirectory,
       si.cast(),
       pi,
@@ -305,12 +307,48 @@ class PtyCoreWindows implements PtyCore {
   }
 }
 
-// void rawWait(int hProcess) {
-//   // final status = allocate<Int32>();
-//   // unistd.waitpid(pid, status, 0);
-//   final count = 1;
-//   final pids = calloc<IntPtr>(count);
-//   final infinite = 0xFFFFFFFF;
-//   pids.elementAt(0).value = hProcess;
-//   win32.MsgWaitForMultipleObjects(count, pids, 1, infinite, win32.QS_ALLEVENTS);
-// }
+typedef GetEnvironmentStringsNative = Pointer<Utf16> Function();
+typedef GetEnvironmentStringsDart = Pointer<Utf16> Function();
+typedef FreeEnvironmentStringsNative =
+    Int32 Function(Pointer<Utf16> lpszEnvironmentBlock);
+typedef FreeEnvironmentStringsDart =
+    int Function(Pointer<Utf16> lpszEnvironmentBlock);
+
+class WinEnv {
+  static final kernel32 = DynamicLibrary.open('kernel32.dll');
+
+  static final GetEnvironmentStringsW = kernel32
+      .lookupFunction<GetEnvironmentStringsNative, GetEnvironmentStringsDart>(
+        'GetEnvironmentStringsW',
+      );
+
+  static final FreeEnvironmentStringsW = kernel32
+      .lookupFunction<FreeEnvironmentStringsNative, FreeEnvironmentStringsDart>(
+        'FreeEnvironmentStringsW',
+      );
+
+  Map<String, String> getEnvironment() {
+    final wstrings = GetEnvironmentStringsW();
+
+    try {
+      final strings = win32.PWSTR(wstrings).toDartStringList(32 * 1024);
+      var map = <String, String>{};
+      for (var string in strings) {
+        if (string.startsWith('=')) continue;
+        final int separatorIndex = string.indexOf(
+          '=',
+          1,
+        ); // Start at 1 to skip leading '='
+        if (separatorIndex != -1) {
+          final k = string.substring(0, separatorIndex);
+          final v = string.substring(separatorIndex + 1);
+          map[k] = v;
+        }
+      }
+
+      return map;
+    } finally {
+      FreeEnvironmentStringsW(wstrings);
+    }
+  }
+}
