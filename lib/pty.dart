@@ -28,6 +28,7 @@ abstract class PseudoTerminal {
     late PtyCore core;
 
     if (Platform.isWindows) {
+      blocking = true;
       core = PtyCoreWindows.start(
         executable,
         arguments,

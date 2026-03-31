@@ -7,49 +7,6 @@ import 'package:pty/src/pty_core.dart';
 import 'package:pty/src/pty_error.dart';
 import 'package:win32/win32.dart' as win32;
 
-class _NamedPipe {
-  _NamedPipe({bool nowait = false}) {
-    final pipeName = r'\\.\pipe\mypipe'.toPcwstr();
-
-    final waitMode = nowait ? win32.PIPE_NOWAIT : win32.PIPE_WAIT;
-
-    final namedPipe = win32.CreateNamedPipe(
-      pipeName,
-      win32.PIPE_ACCESS_DUPLEX,
-      waitMode | win32.PIPE_READMODE_MESSAGE | win32.PIPE_TYPE_MESSAGE,
-      win32.PIPE_UNLIMITED_INSTANCES,
-      4096,
-      4096,
-      0,
-      nullptr,
-    );
-
-    if (namedPipe == win32.INVALID_HANDLE_VALUE) {
-      throw PtyException('CreateNamedPipe failed: ${win32.GetLastError()}');
-    }
-
-    final namedPipeClient = win32.CreateFile(
-      pipeName,
-      win32.GENERIC_READ | win32.GENERIC_WRITE,
-      win32.FILE_SHARE_NONE, // no sharing
-      nullptr, // default security attributes
-      win32.OPEN_EXISTING, // opens existing pipe ,
-      win32.FILE_FLAGS_AND_ATTRIBUTES(0), // default attributes
-      null, // no template file
-    );
-
-    if (namedPipeClient.error != win32.ERROR_SUCCESS) {
-      throw PtyException('CreateFile on named pipe failed');
-    }
-
-    readSide = namedPipe;
-    writeSide = namedPipeClient.value;
-  }
-
-  late final win32.HANDLE readSide;
-  late final win32.HANDLE writeSide;
-}
-
 class PtyCoreWindows implements PtyCore {
   factory PtyCoreWindows.start(
     String executable,
@@ -59,11 +16,11 @@ class PtyCoreWindows implements PtyCore {
     bool blocking = false,
   }) {
     // create input pipe
-    final hReadPipe = calloc<IntPtr>();
-    final hWritePipe = calloc<IntPtr>();
+    final hInputReadPipe = calloc<IntPtr>();
+    final hInputWritePipe = calloc<IntPtr>();
     final pipe2 = win32.CreatePipe(
-      hReadPipe.cast<win32.HANDLE>(),
-      hWritePipe.cast<win32.HANDLE>(),
+      hInputReadPipe.cast<win32.HANDLE>(),
+      hInputWritePipe.cast<win32.HANDLE>(),
       null,
       0,
     );
@@ -73,13 +30,18 @@ class PtyCoreWindows implements PtyCore {
     }
 
     // create output pipe
-    final pipe1 = _NamedPipe(nowait: !blocking);
-    final outputReadSide = pipe1.readSide;
-    final outputWriteSide = pipe1.writeSide;
+    final hOutReadPipe = calloc<IntPtr>();
+    final hOutWritePipe = calloc<IntPtr>();
+    final pipe1 = win32.CreatePipe(
+      hOutReadPipe.cast<win32.HANDLE>(),
+      hOutWritePipe.cast<win32.HANDLE>(),
+      null,
+      0,
+    );
 
-    // final pipe2 = _NamedPipe(nowait: false);
-    // final inputWriteSide = pipe2.writeSide;
-    // final inputReadSide = pipe2.readSide;
+    if (pipe1 == win32.INVALID_HANDLE_VALUE) {
+      throw PtyException('CreatePipe failed: ${win32.GetLastError()}');
+    }
 
     // create pty
     final size = calloc<win32.COORD>().ref;
@@ -87,8 +49,8 @@ class PtyCoreWindows implements PtyCore {
     size.Y = 25;
     final hpConPty = win32.CreatePseudoConsole(
       size,
-      win32.HANDLE(Pointer.fromAddress(hReadPipe.value)),
-      outputWriteSide,
+      win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)),
+      win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value)),
       0,
     );
 
@@ -188,9 +150,25 @@ class PtyCoreWindows implements PtyCore {
       throw PtyException('CreateProcess failed: ${win32.GetLastError()}');
     }
 
+    final inputWriteHandle = win32.HANDLE(
+      Pointer.fromAddress(hInputWritePipe.value),
+    );
+    final outputReadHandle = win32.HANDLE(
+      Pointer.fromAddress(hOutReadPipe.value),
+    );
+
+    for (final addr in [
+      hInputReadPipe,
+      hInputWritePipe,
+      hOutReadPipe,
+      hOutWritePipe,
+    ]) {
+      calloc.free(addr);
+    }
+
     return PtyCoreWindows._(
-      win32.HANDLE(Pointer.fromAddress(hWritePipe.value)),
-      outputReadSide,
+      inputWriteHandle,
+      outputReadHandle,
       hpConPty,
       pi.ref.hProcess,
     );
