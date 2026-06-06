@@ -3,10 +3,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
-import 'package:pty/src/pty_core.dart';
-import 'package:pty/src/pty_error.dart';
-import 'package:pty/src/util/unix_const.dart';
-import 'package:pty/src/util/unix_ffi.dart';
+import 'package:pty2/src/pty_core.dart';
+import 'package:pty2/src/pty_error.dart';
+import 'package:pty2/src/util/unix_const.dart';
+import 'package:pty2/src/util/unix_ffi.dart';
 
 void _setNonblock(int fd) {
   var flag = unix.fcntl(fd, consts.F_GETFL);
@@ -40,7 +40,7 @@ class PtyCoreUnix implements PtyCore {
       'DISPLAY',
       'LC_TYPE',
       'HOME',
-      'PATH'
+      'PATH',
     ];
 
     for (var entry in Platform.environment.entries) {
@@ -78,19 +78,19 @@ class PtyCoreUnix implements PtyCore {
 
       // build argv
       final argv = calloc<Pointer<Utf8>>(arguments.length + 2);
-      argv.elementAt(0).value = executable.toNativeUtf8();
-      argv.elementAt(arguments.length + 1).value = nullptr;
+      (argv + 0).value = executable.toNativeUtf8();
+      (argv + arguments.length + 1).value = nullptr;
       for (var i = 0; i < arguments.length; i++) {
-        argv.elementAt(i + 1).value = arguments[i].toNativeUtf8();
+        (argv + i + 1).value = arguments[i].toNativeUtf8();
       }
 
       //build env
       final env = calloc<Pointer<Utf8>>(effectiveEnv.length + 1);
-      env.elementAt(effectiveEnv.length).value = nullptr;
+      (env + effectiveEnv.length).value = nullptr;
       var cnt = 0;
       for (var entry in effectiveEnv.entries) {
         final envVal = '${entry.key}=${entry.value}';
-        env.elementAt(cnt).value = envVal.toNativeUtf8();
+        (env + cnt).value = envVal.toNativeUtf8();
         cnt++;
       }
 
@@ -173,7 +173,7 @@ class PtyCoreUnix implements PtyCore {
     calloc.free(sz);
 
     if (ret == -1) {
-      print(_ptm);
+      // print(_ptm);
       // print(unix.errno.value);
       unix.perror(nullptr);
     }

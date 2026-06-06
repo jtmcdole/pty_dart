@@ -1,13 +1,33 @@
-import 'package:pty/pty.dart';
+// ignore_for_file: avoid_print
+
+import 'dart:io';
+import 'package:pty2/pty.dart';
 
 void main() async {
-  final pty = PseudoTerminal.start('bash', []);
+  print('Platform: ${Platform.isWindows ? 'pwsh.exe' : 'bash'}');
 
-  pty.write('ls\n');
+  final pty = PseudoTerminal.start(
+    Platform.isWindows ? 'pwsh.exe' : 'bash',
+    [],
+    environment: {'codefu': '1234'},
+    blocking: true,
+  );
+
+  pty.resize(120, 40);
+
+  if (Platform.isWindows) {
+    pty.write('dir\r\n');
+  } else {
+    pty.write('ls -la\n');
+  }
+  pty.write('echo \$env:codefu\r\n');
 
   pty.out.listen((data) {
-    print(data);
+    print('out: $data');
   });
+
+  await Future.delayed(const Duration(seconds: 1));
+  pty.kill();
 
   print(await pty.exitCode);
 }

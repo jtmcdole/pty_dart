@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:pty/pty.dart';
+import 'package:pty2/pty.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -1,3 +1,5 @@
+// ignore_for_file: library_private_types_in_public_api, non_constant_identifier_names, no_leading_underscores_for_local_identifiers, camel_case_types
+
 import 'dart:ffi';
 import 'dart:io';
 
@@ -21,16 +23,18 @@ typedef _dart_unlockpt = int Function(int __fd);
 typedef _c_tcgetattr = Int32 Function(Int32 __fd, Pointer<termios> __termios_p);
 typedef _dart_tcgetattr = int Function(int __fd, Pointer<termios> __termios_p);
 
-typedef _c_tcsetattr = Int32 Function(
-  Int32 __fd,
-  Int32 __optional_actions,
-  Pointer<termios> __termios_p,
-);
-typedef _dart_tcsetattr = int Function(
-  int __fd,
-  int __optional_actions,
-  Pointer<termios> __termios_p,
-);
+typedef _c_tcsetattr =
+    Int32 Function(
+      Int32 __fd,
+      Int32 __optional_actions,
+      Pointer<termios> __termios_p,
+    );
+typedef _dart_tcsetattr =
+    int Function(
+      int __fd,
+      int __optional_actions,
+      Pointer<termios> __termios_p,
+    );
 
 typedef _c_fork = Int32 Function();
 typedef _dart_fork = int Function();
@@ -44,52 +48,46 @@ typedef _dart_ptsname = Pointer<Utf8> Function(int __sysno);
 typedef _c_dup2 = Int32 Function(Int32 __fd, Int32 __fd2);
 typedef _dart_dup2 = int Function(int __fd, int __fd2);
 
-typedef _c_execvp = Int32 Function(
-  Pointer<Utf8> __file,
-  Pointer<Pointer<Utf8>> __argv,
-);
-typedef _dart_execvp = int Function(
-  Pointer<Utf8> __file,
-  Pointer<Pointer<Utf8>> __argv,
-);
+typedef _c_execvp =
+    Int32 Function(Pointer<Utf8> __file, Pointer<Pointer<Utf8>> __argv);
+typedef _dart_execvp =
+    int Function(Pointer<Utf8> __file, Pointer<Pointer<Utf8>> __argv);
 
-typedef _c_forkpty = Int32 Function(
-  Pointer<Int32> masterRef,
-  Pointer<Utf8> name,
-  Pointer<termios> termp,
-  Pointer<winsize> winp,
-);
-typedef _dart_forkpty = int Function(
-  Pointer<Int32> masterRef,
-  Pointer<Utf8> name,
-  Pointer<termios> termp,
-  Pointer<winsize> winp,
-);
+typedef _c_forkpty =
+    Int32 Function(
+      Pointer<Int32> masterRef,
+      Pointer<Utf8> name,
+      Pointer<termios> termp,
+      Pointer<winsize> winp,
+    );
+typedef _dart_forkpty =
+    int Function(
+      Pointer<Int32> masterRef,
+      Pointer<Utf8> name,
+      Pointer<termios> termp,
+      Pointer<winsize> winp,
+    );
 
-typedef _c_execve = Int32 Function(
-  Pointer<Utf8> __file,
-  Pointer<Pointer<Utf8>> __argv,
-  Pointer<Pointer<Utf8>> __envp,
-);
-typedef _dart_execve = int Function(
-  Pointer<Utf8> __file,
-  Pointer<Pointer<Utf8>> __argv,
-  Pointer<Pointer<Utf8>> __envp,
-);
+typedef _c_execve =
+    Int32 Function(
+      Pointer<Utf8> __file,
+      Pointer<Pointer<Utf8>> __argv,
+      Pointer<Pointer<Utf8>> __envp,
+    );
+typedef _dart_execve =
+    int Function(
+      Pointer<Utf8> __file,
+      Pointer<Pointer<Utf8>> __argv,
+      Pointer<Pointer<Utf8>> __envp,
+    );
 
 typedef _c_read = Int64 Function(Int32 _fd, Pointer<Void> _buf, Int32 _nbytes);
 typedef _dart_read = int Function(int _fd, Pointer<Void> _buf, int _nbytes);
 
-typedef _c_waitpid = Int32 Function(
-  Int32 __pid,
-  Pointer<Int32> __stat_loc,
-  Int32 __options,
-);
-typedef _dart_waitpid = int Function(
-  int __pid,
-  Pointer<Int32> __stat_loc,
-  int __options,
-);
+typedef _c_waitpid =
+    Int32 Function(Int32 __pid, Pointer<Int32> __stat_loc, Int32 __options);
+typedef _dart_waitpid =
+    int Function(int __pid, Pointer<Int32> __stat_loc, int __options);
 
 typedef _c_kill = Int32 Function(Int32 pid, Int32 sig);
 typedef _dart_kill = int Function(int pid, int sig);
@@ -115,24 +113,19 @@ typedef _dart_close = int Function(int fd);
 typedef _c_putenv = Int32 Function(Pointer<Int8> string);
 typedef _dart_putenv = int Function(Pointer<Int8> string);
 
-typedef _c_setenv = Int32 Function(
-  Pointer<Utf8> name,
-  Pointer<Utf8> value,
-  Int32 replace,
-);
-typedef _dart_setenv = int Function(
-  Pointer<Utf8> name,
-  Pointer<Utf8> value,
-  int replace,
-);
+typedef _c_setenv =
+    Int32 Function(Pointer<Utf8> name, Pointer<Utf8> value, Int32 replace);
+typedef _dart_setenv =
+    int Function(Pointer<Utf8> name, Pointer<Utf8> value, int replace);
 
 typedef _c_chdir = Int32 Function(Pointer<Utf8> __path);
 typedef _dart_chdir = int Function(Pointer<Utf8> __path);
 
 class Unix {
   Unix(DynamicLibrary lib) {
-    final utilsLib =
-        Platform.isLinux ? DynamicLibrary.open('libutil.so') : null;
+    final utilsLib = Platform.isLinux
+        ? DynamicLibrary.open('libutil.so')
+        : null;
 
     if (!Platform.isAndroid) {
       // this line will crash on android
@@ -197,7 +190,7 @@ class Unix {
   late final _dart_chdir chdir;
 }
 
-class termios extends Struct {
+final class termios extends Struct {
   @Uint64()
   external int c_iflag; /* input mode flags */
   @Uint64()
@@ -281,7 +274,7 @@ class termios extends Struct {
   external int c_ospeed; /* output speed */
 }
 
-class winsize extends Struct {
+final class winsize extends Struct {
   @Uint16()
   external int ws_row;
 

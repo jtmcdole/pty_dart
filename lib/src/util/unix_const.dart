@@ -1,18 +1,18 @@
-// ignore_for_file: annotate_overrides
+// ignore_for_file: non_constant_identifier_names, annotate_overrides
 
 import 'dart:io';
 
 final consts = Platform.isAndroid
     ? AndroidConst()
     : Platform.isLinux
-        ? LinuxConst()
-        : BsdConst();
+    ? LinuxConst()
+    : BsdConst();
 
 class AndroidConst extends BsdConst {
   @override
-  final TIOCSWINSZ = 0x5414;
+  int get TIOCSWINSZ => 0x5414;
   @override
-  final O_NONBLOCK = 4000;
+  int get O_NONBLOCK => 4000;
 }
 
 class LinuxConst implements BsdConst {

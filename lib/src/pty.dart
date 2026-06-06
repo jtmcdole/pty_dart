@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
-import 'package:pty/pty.dart';
-import 'package:pty/src/pty_core.dart';
+import 'package:pty2/pty.dart';
+import 'package:pty2/src/pty_core.dart';
 
 abstract class BasePseudoTerminal implements PseudoTerminal {
   BasePseudoTerminal(this._core);
@@ -35,17 +36,16 @@ abstract class BasePseudoTerminal implements PseudoTerminal {
 /// A polling based PseudoTerminal implementation. Mainly used in flutter debug
 /// mode to make hot reload work. The underlying PtyCore must be non-blocking.
 class PollingPseudoTerminal extends BasePseudoTerminal {
-  PollingPseudoTerminal(PtyCore _core) : super(_core);
+  PollingPseudoTerminal(super._core);
 
   //initialize them late to avoid having any closures in the instance
   //so that this PollingPseudoTerminal can be passed to an Isolate
-  late Completer<int> _exitCode;
+  late final Completer<int> _exitCode = Completer<int>();
   late StreamController<String> _out;
   bool _initialized = false;
 
   @override
   void init() {
-    _exitCode = Completer<int>();
     _out = StreamController<String>();
     _initialized = true;
     Timer.run(() {
@@ -54,7 +54,8 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
   }
 
   List<int> _createDelayMicrosecondsStepList(
-      Map<int, int> delayMicrosecondsToAmountMap) {
+    Map<int, int> delayMicrosecondsToAmountMap,
+  ) {
     final result = List<int>.empty(growable: true);
     final sortedKeys = delayMicrosecondsToAmountMap.keys.toList(growable: false)
       ..sort();
@@ -84,7 +85,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
 
     var exitCodeCheckNeeded = true;
 
-    final rawDataBuffer = List<int>.empty(growable: true);
+    final rawDataBuffer = <Uint8List>[];
 
     while (true) {
       if (exitCodeCheckNeeded) {
@@ -105,7 +106,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
       var data = _core.read();
       while (data != null) {
         receivedSomething = true;
-        rawDataBuffer.addAll(data);
+        rawDataBuffer.add(data);
         data = _core.read();
       }
       if (!receivedSomething) {
@@ -121,9 +122,11 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
       if (_initialized) {
         if (rawDataBuffer.isNotEmpty) {
           try {
-            final strContent = utf8.decode(rawDataBuffer);
+            for (final bytes in rawDataBuffer) {
+              final utf = utf8.decode(bytes, allowMalformed: true);
+              _out.add(utf);
+            }
             rawDataBuffer.clear();
-            _out.add(strContent);
           } on FormatException catch (_) {
             // FormatException is thrown when the data contains incomplete
             // UTF-8 byte sequences.
@@ -133,7 +136,8 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
         }
       }
       await Future.delayed(
-          Duration(microseconds: delayMicrosecondsSteps[delayStepIndex]));
+        Duration(microseconds: delayMicrosecondsSteps[delayStepIndex]),
+      );
     }
   }
 
@@ -158,7 +162,7 @@ class PollingPseudoTerminal extends BasePseudoTerminal {
 /// flutter hot reload from working. Ideal for release builds. The underlying
 /// PtyCore must be blocking.
 class BlockingPseudoTerminal extends BasePseudoTerminal {
-  BlockingPseudoTerminal(PtyCore _core, this._syncProcessed) : super(_core);
+  BlockingPseudoTerminal(super._core, this._syncProcessed);
 
   late SendPort _sendPort;
   final bool _syncProcessed;
@@ -174,21 +178,36 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
     receivePort.listen((msg) {
       if (first) {
         _sendPort = msg;
-      } else {
-        _outStreamController.sink.add(msg);
+        first = false;
+        return;
       }
-      first = false;
+
+      switch (msg) {
+        case String _:
+          _outStreamController.sink.add(msg);
+
+          break;
+        case Uint8List _:
+          _outStreamController.sink.add(utf8.decode(msg, allowMalformed: true));
+          break;
+        default:
+        // print('wtf happened here? ${(type: msg.runtimeType, msg: msg)}');
+      }
     });
-    Isolate.spawn(_readUntilExit,
-        _IsolateArgs(receivePort.sendPort, _core, _syncProcessed));
+    Isolate.spawn(
+      _readUntilExit,
+      _IsolateArgs(receivePort.sendPort, _core, _syncProcessed),
+    );
   }
 
   @override
   Future<int> get exitCode async {
     final receivePort = ReceivePort();
     // ignore: unawaited_futures
-    Isolate.spawn(_waitForExitCode,
-        _IsolateArgs(receivePort.sendPort, _core, _syncProcessed));
+    Isolate.spawn(
+      _waitForExitCode,
+      _IsolateArgs(receivePort.sendPort, _core, _syncProcessed),
+    );
     return (await receivePort.first) as int;
   }
 
@@ -227,7 +246,8 @@ void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
   // event loop from working.
   final input = StreamController<List<int>>(sync: true);
 
-  input.stream.transform(utf8.decoder).listen(ctx.sendPort.send);
+  final utf8corrupt = Utf8Codec(allowMalformed: true);
+  input.stream.transform(utf8corrupt.decoder).listen(ctx.sendPort.send);
 
   final loopController = StreamController<bool>();
 
@@ -242,6 +262,7 @@ void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
     final data = ctx.arg.read();
 
     if (data == null) {
+      // print('data == null?');
       await input.close();
       break;
     }

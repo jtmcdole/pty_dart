@@ -1,11 +1,9 @@
-library pty;
-
 import 'dart:io';
 
-import 'package:pty/src/impl/unix.dart';
-import 'package:pty/src/impl/windows.dart';
-import 'package:pty/src/pty.dart';
-import 'package:pty/src/pty_core.dart';
+import 'package:pty2/src/impl/unix.dart';
+import 'package:pty2/src/impl/windows.dart';
+import 'package:pty2/src/pty.dart';
+import 'package:pty2/src/pty_core.dart';
 
 export 'src/pty.dart';
 
@@ -27,6 +25,7 @@ abstract class PseudoTerminal {
     late PtyCore core;
 
     if (Platform.isWindows) {
+      blocking = true;
       core = PtyCoreWindows.start(
         executable,
         arguments,
@@ -36,8 +35,10 @@ abstract class PseudoTerminal {
       );
     } else {
       //add '-l' as argument for the shell to perform a login
-      arguments = List<String>.generate(arguments.length + 1,
-          (index) => index == 0 ? '-l' : arguments[index - 1]);
+      arguments = List<String>.generate(
+        arguments.length + 1,
+        (index) => index == 0 ? '-l' : arguments[index - 1],
+      );
 
       core = PtyCoreUnix.start(
         executable,
@@ -48,11 +49,13 @@ abstract class PseudoTerminal {
       );
     }
 
+    final BasePseudoTerminal pty;
     if (blocking) {
-      return BlockingPseudoTerminal(core, ackProcessed);
+      pty = BlockingPseudoTerminal(core, ackProcessed);
     } else {
-      return PollingPseudoTerminal(core);
+      pty = PollingPseudoTerminal(core);
     }
+    return pty..init();
   }
 
   void init();
