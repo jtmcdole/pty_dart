@@ -168,10 +168,23 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
   final bool _syncProcessed;
   late final StreamController<String> _outStreamController;
 
+  late final Future<int> _exitCodeFuture;
+
   @override
   void init() {
     _outStreamController = StreamController<String>();
     out = _outStreamController.stream;
+
+    final exitPort = ReceivePort();
+    Isolate.spawn(
+      _waitForExitCode,
+      _IsolateArgs(exitPort.sendPort, _core, _syncProcessed),
+    );
+    _exitCodeFuture = exitPort.first.then((value) {
+      exitPort.close();
+      _core.kill();
+      return value as int;
+    });
 
     final receivePort = ReceivePort();
     var first = true;
@@ -206,15 +219,7 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
   }
 
   @override
-  Future<int> get exitCode async {
-    final receivePort = ReceivePort();
-    // ignore: unawaited_futures
-    Isolate.spawn(
-      _waitForExitCode,
-      _IsolateArgs(receivePort.sendPort, _core, _syncProcessed),
-    );
-    return (await receivePort.first) as int;
-  }
+  Future<int> get exitCode => _exitCodeFuture;
 
   @override
   late Stream<String> out;
