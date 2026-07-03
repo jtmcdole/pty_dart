@@ -5,35 +5,46 @@ import 'package:test/test.dart';
 
 void main() {
   test('Can instantiate and kill PseudoTerminal', () async {
-    final pty = PseudoTerminal.start(_getShell(), []);
+    final pty = PseudoTerminal.start(_getShell(), [], blocking: true);
     pty.kill();
     await pty.exitCode;
-  }, timeout: Timeout.factor(0.3));
+  });
 
-  // on windows PseudoTerminal only works in Flutter release mode..
+  test('Can read exit code', () async {
+    final pty = PseudoTerminal.start(_getShell(), [], blocking: true);
 
-  // test('Can read exit code', () async {
-  //   final pty = PseudoTerminal.start(_getShell(), []);
-  //   pty.write('exit 3\n');
-  //   expect(await pty.exitCode, equals(3));
-  // }, timeout: Timeout.factor(0.3));
+    if (Platform.isWindows) {
+      pty.write('exit 3\r\n');
+    } else {
+      pty.write('exit 3\r');
+    }
 
-  // test('echo test', () async {
-  //   final pty = PseudoTerminal.start(_getShell(), []);
-  //   pty.write('echo hello world\n');
+    expect(await pty.exitCode, equals(3));
+  });
 
-  //   final output = await pty.out.single.timeout(Duration(seconds: 10));
-  //   expect(output, equals('hello world'));
+  test('echo test', () async {
+    final pty = PseudoTerminal.start(_getShell(), [], blocking: true);
 
-  //   pty.kill();
-  //   await pty.exitCode.timeout(Duration(seconds: 10));
-  // }, timeout: Timeout.factor(0.3));
+    if (Platform.isWindows) {
+      pty.write('echo hello world\r\n');
+      pty.write('exit 0\r\n');
+    } else {
+      pty.write('echo hello world\r');
+      pty.write('exit 0\r');
+    }
+
+    final output = await pty.out.toList();
+    final fullOutput = output.join('');
+
+    expect(fullOutput, contains('hello world'));
+
+    await pty.exitCode;
+  });
 }
 
 String _getShell() {
   if (Platform.isWindows) {
     return 'cmd';
   }
-
   return 'sh';
 }

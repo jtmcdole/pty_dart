@@ -94,7 +94,21 @@ class PtyCoreUnix implements PtyCore {
         cnt++;
       }
 
-      unix.execve(executable.toNativeUtf8(), argv, env);
+      var resolvedExecutable = executable;
+      if (!resolvedExecutable.contains('/')) {
+        final pathEnv = effectiveEnv['PATH'] ?? Platform.environment['PATH'] ?? '';
+        for (final dir in pathEnv.split(':')) {
+          if (dir.isEmpty) continue;
+          final testPath = '$dir/$executable';
+          if (File(testPath).existsSync()) {
+            resolvedExecutable = testPath;
+            break;
+          }
+        }
+      }
+
+      unix.execve(resolvedExecutable.toNativeUtf8(), argv, env);
+      unix.exit(1);
     } else {
       unix.setsid();
 
@@ -144,7 +158,11 @@ class PtyCoreUnix implements PtyCore {
       return null;
     }
 
-    return status;
+    if ((status & 0x7F) != 0) {
+      // killed by signal
+      return 128 + (status & 0x7F);
+    }
+    return (status & 0xFF00) >> 8;
   }
 
   @override
@@ -155,7 +173,11 @@ class PtyCoreUnix implements PtyCore {
     final status = statusPointer.value;
     calloc.free(statusPointer);
 
-    return status;
+    if ((status & 0x7F) != 0) {
+      // killed by signal
+      return 128 + (status & 0x7F);
+    }
+    return (status & 0xFF00) >> 8;
   }
 
   @override

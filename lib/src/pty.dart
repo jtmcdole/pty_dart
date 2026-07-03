@@ -176,8 +176,13 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
     final receivePort = ReceivePort();
     var first = true;
     receivePort.listen((msg) {
+      if (msg == null) {
+        receivePort.close();
+        _outStreamController.close();
+        return;
+      }
       if (first) {
-        _sendPort = msg;
+        _sendPort = msg as SendPort;
         first = false;
         return;
       }
@@ -278,4 +283,5 @@ void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
     }
   }
   await loopController.close();
+  ctx.sendPort.send(null);
 }

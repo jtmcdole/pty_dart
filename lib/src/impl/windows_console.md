@@ -30,7 +30,7 @@ toc_rel: toc.json
 pdf_url_template: https://learn.microsoft.com/pdfstore/en-us/MSDN.console/{branchName}{pdfName}
 word_count: 1610
 asset_id: creating-a-pseudoconsole-session
-moniker_range_name: 
+moniker_range_name:
 monikers: []
 item_type: Content
 source_path: docs/creating-a-pseudoconsole-session.md
