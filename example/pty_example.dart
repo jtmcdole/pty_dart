@@ -20,7 +20,11 @@ void main() async {
   } else {
     pty.write('ls -la\n');
   }
-  pty.write('echo \$env:codefu\r\n');
+  if (Platform.isWindows) {
+    pty.write('echo \$env:codefu\r\n');
+  } else {
+    pty.write('echo \$codefu\n');
+  }
 
   pty.out.listen((data) {
     print('out: $data');
