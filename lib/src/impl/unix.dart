@@ -96,7 +96,8 @@ class PtyCoreUnix implements PtyCore {
 
       var resolvedExecutable = executable;
       if (!resolvedExecutable.contains('/')) {
-        final pathEnv = effectiveEnv['PATH'] ?? Platform.environment['PATH'] ?? '';
+        final pathEnv =
+            effectiveEnv['PATH'] ?? Platform.environment['PATH'] ?? '';
         for (final dir in pathEnv.split(':')) {
           if (dir.isEmpty) continue;
           final testPath = '$dir/$executable';
@@ -108,10 +109,9 @@ class PtyCoreUnix implements PtyCore {
       }
 
       unix.execve(resolvedExecutable.toNativeUtf8(), argv, env);
-      unix.exit(1);
+      unix.cExit(1);
     } else {
       unix.setsid();
-
       if (!blocking) {
         _setNonblock(ptm);
       }
@@ -157,6 +157,9 @@ class PtyCoreUnix implements PtyCore {
     if (pid == 0) {
       return null;
     }
+    if (pid < 0) {
+      return 0; // ECHILD: Dart VM's global SIGCHLD handler stole the status
+    }
 
     if ((status & 0x7F) != 0) {
       // killed by signal
@@ -168,10 +171,14 @@ class PtyCoreUnix implements PtyCore {
   @override
   int exitCodeBlocking() {
     final statusPointer = calloc<Int32>();
-    unix.waitpid(_pid, statusPointer, 0);
+    final pid = unix.waitpid(_pid, statusPointer, 0);
 
     final status = statusPointer.value;
     calloc.free(statusPointer);
+
+    if (pid < 0) {
+      return 0; // ECHILD: Dart VM's global SIGCHLD handler stole the status
+    }
 
     if ((status & 0x7F) != 0) {
       // killed by signal

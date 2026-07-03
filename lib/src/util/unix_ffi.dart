@@ -164,7 +164,7 @@ class Unix {
     putenv = lib.lookupFunction<_c_putenv, _dart_putenv>('putenv');
     setenv = lib.lookupFunction<_c_setenv, _dart_setenv>('setenv');
     chdir = lib.lookupFunction<_c_chdir, _dart_chdir>('chdir');
-    exit = lib.lookupFunction<_c_exit, _dart_exit>('exit');
+    cExit = lib.lookupFunction<_c_exit, _dart_exit>('_exit');
     if (utilsLib != null) {
       forkpty = utilsLib.lookupFunction<_c_forkpty, _dart_forkpty>('forkpty');
     } else {
@@ -198,7 +198,7 @@ class Unix {
   late final _dart_putenv putenv;
   late final _dart_setenv setenv;
   late final _dart_chdir chdir;
-  late final _dart_exit exit;
+  late final _dart_exit cExit;
 }
 
 final class termios extends Struct {
