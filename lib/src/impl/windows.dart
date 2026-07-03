@@ -50,24 +50,27 @@ class PtyCoreWindows implements PtyCore {
     }
 
     var useConPTY = true;
+    try {
+      if (!stdin.hasTerminal) {
+        useConPTY = false;
+      }
+    } catch (_) {
+      useConPTY = false;
+    }
     win32.HPCON? hpConPty;
     win32.HANDLE? inputWriteHandle;
     win32.HANDLE? outputReadHandle;
+    win32.HANDLE? inputReadHandle;
+    win32.HANDLE? outputWriteHandle;
     win32.HANDLE? hProcess;
 
-    // Set up security attributes for pipe handles to allow inheritance for conhost.exe
-    final sa = calloc<win32.SECURITY_ATTRIBUTES>();
-    sa.ref.nLength = sizeOf<win32.SECURITY_ATTRIBUTES>();
-    sa.ref.lpSecurityDescriptor = nullptr;
-    sa.ref.bInheritHandle = true;
-
-    // create pipes
+    // create pipes (non-inheritable for ConPTY, identical to master)
     final hInputReadPipe = calloc<IntPtr>();
     final hInputWritePipe = calloc<IntPtr>();
     var pipe1 = win32.CreatePipe(
       hInputReadPipe.cast<win32.HANDLE>(),
       hInputWritePipe.cast<win32.HANDLE>(),
-      sa,
+      nullptr,
       0,
     );
 
@@ -76,27 +79,13 @@ class PtyCoreWindows implements PtyCore {
     var pipe2 = win32.CreatePipe(
       hOutReadPipe.cast<win32.HANDLE>(),
       hOutWritePipe.cast<win32.HANDLE>(),
-      sa,
+      nullptr,
       0,
     );
 
-    if (pipe1.error != win32.ERROR_SUCCESS || pipe2.error != win32.ERROR_SUCCESS) {
+    if (pipe1.error != win32.ERROR_SUCCESS ||
+        pipe2.error != win32.ERROR_SUCCESS) {
       useConPTY = false;
-    }
-
-    // Disable inheritance on our side of the pipe handles
-    const handleFlagInherit = 1;
-    if (useConPTY) {
-      win32.SetHandleInformation(
-        win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)),
-        handleFlagInherit,
-        win32.HANDLE_FLAGS(0),
-      );
-      win32.SetHandleInformation(
-        win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value)),
-        handleFlagInherit,
-        win32.HANDLE_FLAGS(0),
-      );
     }
 
     // create pty
@@ -104,7 +93,7 @@ class PtyCoreWindows implements PtyCore {
       final size = calloc<win32.COORD>().ref;
       size.X = 80;
       size.Y = 25;
-      
+
       try {
         final ptyHandle = win32.CreatePseudoConsole(
           size,
@@ -133,30 +122,35 @@ class PtyCoreWindows implements PtyCore {
       final bytesRequired = calloc<IntPtr>();
       win32.InitializeProcThreadAttributeList(null, 1, bytesRequired);
       final lpAttributeListPtr = calloc<Int8>(bytesRequired.value);
-      si.ref.lpAttributeList = win32.LPPROC_THREAD_ATTRIBUTE_LIST(lpAttributeListPtr);
-      win32.InitializeProcThreadAttributeList(si.ref.lpAttributeList, 1, bytesRequired);
+      si.ref.lpAttributeList = win32.LPPROC_THREAD_ATTRIBUTE_LIST(
+        lpAttributeListPtr,
+      );
+      win32.InitializeProcThreadAttributeList(
+        si.ref.lpAttributeList,
+        1,
+        bytesRequired,
+      );
 
-      final pHpcon = calloc<IntPtr>();
-      pHpcon.value = hpConPty;
-
-       var ret = win32.UpdateProcThreadAttribute(
+      var ret = win32.UpdateProcThreadAttribute(
         si.ref.lpAttributeList,
         0,
         win32.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-        pHpcon.cast<Void>(), // <--- POINTER TO HPCON
+        Pointer.fromAddress(
+          hpConPty,
+        ), // <--- DIRECT HPCON (identical to master)
         sizeOf<IntPtr>(),
         nullptr,
         nullptr,
       );
 
       if (ret.value) {
-        // Spawn process
+        // Spawn process (bInheritHandles = false, identical to master)
         final piRet = win32.CreateProcess(
           null,
           pwstrCommandLine,
           null,
           null,
-          true, // inherit handles
+          false, // <--- inherit handles is false!
           win32.EXTENDED_STARTUPINFO_PRESENT | win32.CREATE_UNICODE_ENVIRONMENT,
           pEnvironment,
           pwstrCurrentDirectory,
@@ -170,22 +164,37 @@ class PtyCoreWindows implements PtyCore {
           final exitCodePtr = calloc<Uint32>();
           win32.GetExitCodeProcess(pi.ref.hProcess, exitCodePtr);
 
-          if (exitCodePtr.value == 3221225794) { // 0xC0000142 STATUS_DLL_INIT_FAILED
+          if (exitCodePtr.value == 3221225794) {
+            // 0xC0000142 STATUS_DLL_INIT_FAILED
+            // ignore: avoid_print
+            print(
+              'PtyCoreWindows: ConPTY failed to initialize (exit code 0xC0000142). Falling back to legacy pipes.',
+            );
             useConPTY = false;
             win32.CloseHandle(pi.ref.hProcess);
             win32.CloseHandle(pi.ref.hThread);
             win32.ClosePseudoConsole(hpConPty);
             hpConPty = null;
           } else {
-            hProcess = win32.HANDLE(Pointer.fromAddress(pi.ref.hProcess.address));
+            // ignore: avoid_print
+            print('PtyCoreWindows: Using ConPTY engine.');
+            hProcess = win32.HANDLE(
+              Pointer.fromAddress(pi.ref.hProcess.address),
+            );
             win32.CloseHandle(pi.ref.hThread);
 
-            // Close the child side handles in the parent process
-            win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)));
-            win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value)));
-
-            inputWriteHandle = win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value));
-            outputReadHandle = win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value));
+            inputWriteHandle = win32.HANDLE(
+              Pointer.fromAddress(hInputWritePipe.value),
+            );
+            outputReadHandle = win32.HANDLE(
+              Pointer.fromAddress(hOutReadPipe.value),
+            );
+            inputReadHandle = win32.HANDLE(
+              Pointer.fromAddress(hInputReadPipe.value),
+            );
+            outputWriteHandle = win32.HANDLE(
+              Pointer.fromAddress(hOutWritePipe.value),
+            );
           }
           calloc.free(exitCodePtr);
         } else {
@@ -197,32 +206,66 @@ class PtyCoreWindows implements PtyCore {
 
       calloc.free(bytesRequired);
       calloc.free(lpAttributeListPtr);
-      calloc.free(pHpcon);
       calloc.free(si);
     }
 
     if (!useConPTY) {
       // Clean up the ConPTY-side pipes
-      win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)));
-      win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)));
+      win32.CloseHandle(
+        win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)),
+      );
+      win32.CloseHandle(
+        win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)),
+      );
       win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value)));
       win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value)));
 
+      // Set up security attributes for legacy pipes to allow inheritance
+      final saLegacy = calloc<win32.SECURITY_ATTRIBUTES>();
+      saLegacy.ref.nLength = sizeOf<win32.SECURITY_ATTRIBUTES>();
+      saLegacy.ref.lpSecurityDescriptor = nullptr;
+      saLegacy.ref.bInheritHandle = true;
+
       // Re-create pipes for legacy redirection
-      win32.CreatePipe(hInputReadPipe.cast<win32.HANDLE>(), hInputWritePipe.cast<win32.HANDLE>(), sa, 0);
-      win32.CreatePipe(hOutReadPipe.cast<win32.HANDLE>(), hOutWritePipe.cast<win32.HANDLE>(), sa, 0);
+      win32.CreatePipe(
+        hInputReadPipe.cast<win32.HANDLE>(),
+        hInputWritePipe.cast<win32.HANDLE>(),
+        saLegacy,
+        0,
+      );
+      win32.CreatePipe(
+        hOutReadPipe.cast<win32.HANDLE>(),
+        hOutWritePipe.cast<win32.HANDLE>(),
+        saLegacy,
+        0,
+      );
 
       // Disable inheritance on our side of the pipe handles
-      win32.SetHandleInformation(win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)), handleFlagInherit, win32.HANDLE_FLAGS(0));
-      win32.SetHandleInformation(win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value)), handleFlagInherit, win32.HANDLE_FLAGS(0));
+      const handleFlagInherit = 1;
+      win32.SetHandleInformation(
+        win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)),
+        handleFlagInherit,
+        win32.HANDLE_FLAGS(0),
+      );
+      win32.SetHandleInformation(
+        win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value)),
+        handleFlagInherit,
+        win32.HANDLE_FLAGS(0),
+      );
 
       // Setup legacy STARTUPINFO
       final siLegacy = calloc<win32.STARTUPINFO>();
       siLegacy.ref.cb = sizeOf<win32.STARTUPINFO>();
       siLegacy.ref.dwFlags = win32.STARTF_USESTDHANDLES;
-      siLegacy.ref.hStdInput = win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value));
-      siLegacy.ref.hStdOutput = win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value));
-      siLegacy.ref.hStdError = win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value));
+      siLegacy.ref.hStdInput = win32.HANDLE(
+        Pointer.fromAddress(hInputReadPipe.value),
+      );
+      siLegacy.ref.hStdOutput = win32.HANDLE(
+        Pointer.fromAddress(hOutWritePipe.value),
+      );
+      siLegacy.ref.hStdError = win32.HANDLE(
+        Pointer.fromAddress(hOutWritePipe.value),
+      );
 
       final piLegacyRet = win32.CreateProcess(
         null,
@@ -238,10 +281,18 @@ class PtyCoreWindows implements PtyCore {
       );
 
       if (!piLegacyRet.value) {
-        win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)));
-        win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)));
-        win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value)));
-        win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value)));
+        win32.CloseHandle(
+          win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)),
+        );
+        win32.CloseHandle(
+          win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value)),
+        );
+        win32.CloseHandle(
+          win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value)),
+        );
+        win32.CloseHandle(
+          win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value)),
+        );
 
         for (final addr in [
           hInputReadPipe,
@@ -251,7 +302,7 @@ class PtyCoreWindows implements PtyCore {
         ]) {
           calloc.free(addr);
         }
-        calloc.free(sa);
+        calloc.free(saLegacy);
         calloc.free(pi);
         calloc.free(siLegacy);
 
@@ -262,13 +313,20 @@ class PtyCoreWindows implements PtyCore {
       win32.CloseHandle(pi.ref.hThread);
 
       // Close the child side handles in the parent process
-      win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)));
+      win32.CloseHandle(
+        win32.HANDLE(Pointer.fromAddress(hInputReadPipe.value)),
+      );
       win32.CloseHandle(win32.HANDLE(Pointer.fromAddress(hOutWritePipe.value)));
 
-      inputWriteHandle = win32.HANDLE(Pointer.fromAddress(hInputWritePipe.value));
+      inputWriteHandle = win32.HANDLE(
+        Pointer.fromAddress(hInputWritePipe.value),
+      );
       outputReadHandle = win32.HANDLE(Pointer.fromAddress(hOutReadPipe.value));
+      inputReadHandle = win32.HANDLE(nullptr);
+      outputWriteHandle = win32.HANDLE(nullptr);
 
       calloc.free(siLegacy);
+      calloc.free(saLegacy);
     }
 
     for (final addr in [
@@ -279,12 +337,13 @@ class PtyCoreWindows implements PtyCore {
     ]) {
       calloc.free(addr);
     }
-    calloc.free(sa);
     calloc.free(pi);
 
     return PtyCoreWindows._(
       inputWriteHandle!,
       outputReadHandle!,
+      inputReadHandle!,
+      outputWriteHandle!,
       hpConPty,
       hProcess!,
     );
@@ -293,19 +352,25 @@ class PtyCoreWindows implements PtyCore {
   PtyCoreWindows._(
     this._inputWriteSide,
     this._outputReadSide,
+    this._inputReadSide,
+    this._outputWriteSide,
     this._hPty,
     this._hProcess,
   ) : _failed = false;
 
   PtyCoreWindows._failed()
-      : _inputWriteSide = win32.HANDLE(nullptr),
-        _outputReadSide = win32.HANDLE(nullptr),
-        _hPty = null,
-        _hProcess = win32.HANDLE(nullptr),
-        _failed = true;
+    : _inputWriteSide = win32.HANDLE(nullptr),
+      _outputReadSide = win32.HANDLE(nullptr),
+      _inputReadSide = win32.HANDLE(nullptr),
+      _outputWriteSide = win32.HANDLE(nullptr),
+      _hPty = null,
+      _hProcess = win32.HANDLE(nullptr),
+      _failed = true;
 
   final win32.HANDLE _inputWriteSide;
   final win32.HANDLE _outputReadSide;
+  final win32.HANDLE _inputReadSide;
+  final win32.HANDLE _outputWriteSide;
   final win32.HPCON? _hPty;
   final win32.HANDLE _hProcess;
   final bool _failed;
@@ -365,12 +430,17 @@ class PtyCoreWindows implements PtyCore {
     });
   }
 
+  bool _killed = false;
+
   @override
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
-    if (_failed) return true;
+    if (_failed || _killed) return true;
+    _killed = true;
     final ret = win32.TerminateProcess(_hProcess, 0);
     if (_hPty != null) {
       win32.ClosePseudoConsole(_hPty);
+      win32.CloseHandle(_inputReadSide);
+      win32.CloseHandle(_outputWriteSide);
     }
     return ret.value;
   }
