@@ -27,7 +27,7 @@ void main() async {
   }
 
   pty.out.listen((data) {
-    print('out: $data');
+    print(data);
   });
 
   await Future.delayed(const Duration(seconds: 1));
