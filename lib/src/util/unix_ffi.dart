@@ -121,6 +121,9 @@ typedef _dart_setenv =
 typedef _c_chdir = Int32 Function(Pointer<Utf8> __path);
 typedef _dart_chdir = int Function(Pointer<Utf8> __path);
 
+typedef _c_exit = Void Function(Int32 status);
+typedef _dart_exit = void Function(int status);
+
 DynamicLibrary? tryOpen(String path) {
   if (!Platform.isLinux) return null;
   try {
@@ -161,6 +164,7 @@ class Unix {
     putenv = lib.lookupFunction<_c_putenv, _dart_putenv>('putenv');
     setenv = lib.lookupFunction<_c_setenv, _dart_setenv>('setenv');
     chdir = lib.lookupFunction<_c_chdir, _dart_chdir>('chdir');
+    exit = lib.lookupFunction<_c_exit, _dart_exit>('exit');
     if (utilsLib != null) {
       forkpty = utilsLib.lookupFunction<_c_forkpty, _dart_forkpty>('forkpty');
     } else {
@@ -194,6 +198,7 @@ class Unix {
   late final _dart_putenv putenv;
   late final _dart_setenv setenv;
   late final _dart_chdir chdir;
+  late final _dart_exit exit;
 }
 
 final class termios extends Struct {

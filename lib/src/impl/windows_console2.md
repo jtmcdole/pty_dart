@@ -1,9 +1,9 @@
 
 
 ```cpp
-    // Note: Most error checking removed for brevity.  
+    // Note: Most error checking removed for brevity.
     // ...
-    
+
     // Initializes the specified startup info struct with the required properties and
     // updates its thread attribute list with the specified ConPTY handle
     HRESULT InitializeStartupInfoAttachedToConPTY(STARTUPINFOEX* siEx, HPCON hPC)
@@ -12,17 +12,17 @@
         size_t size;
 
         siEx->StartupInfo.cb = sizeof(STARTUPINFOEX);
-        
+
         // Create the appropriately sized thread attribute list
         InitializeProcThreadAttributeList(NULL, 1, 0, &size);
         std::unique_ptr<BYTE[]> attrList = std::make_unique<BYTE[]>(size);
-        
+
         // Set startup info's attribute list & initialize it
         siEx->lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(
             attrList.get());
         bool fSuccess = InitializeProcThreadAttributeList(
             siEx->lpAttributeList, 1, 0, (PSIZE_T)&size);
-            
+
         if (fSuccess)
         {
             // Set thread attribute list's Pseudo Console to the specified ConPTY
@@ -42,9 +42,9 @@
         }
         return hr;
     }
-    
+
     // ...
-    
+
     HANDLE hOut, hIn;
     HANDLE outPipeOurSide, inPipeOurSide;
     HANDLE outPipePseudoConsoleSide, inPipePseudoConsoleSide;
@@ -56,10 +56,10 @@
 
     // Create the Pseudo Console, using the pipes
     CreatePseudoConsole(
-        {80, 32}, 
-        inPipePseudoConsoleSide, 
-        outPipePseudoConsoleSide, 
-        0, 
+        {80, 32},
+        inPipePseudoConsoleSide,
+        outPipePseudoConsoleSide,
+        0,
         &hPC);
 
     // Prepare the StartupInfoEx structure attached to the ConPTY.

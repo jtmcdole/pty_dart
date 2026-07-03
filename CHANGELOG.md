@@ -1,6 +1,6 @@
 ## 0.4.0
 
-The real fix for Windows being flakey: "more data in buffer" was treated as an error instead of just reading again. "ERROR_SUCCESS" is such a great enum.   
+The real fix for Windows being flakey: "more data in buffer" was treated as an error instead of just reading again. "ERROR_SUCCESS" is such a great enum.
 
 - Upgrade win32 to 6.0
 - Upgrade ffi to 2.2.0
