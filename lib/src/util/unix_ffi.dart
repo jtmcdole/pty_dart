@@ -23,6 +23,9 @@ typedef _dart_unlockpt = int Function(int __fd);
 typedef _c_tcgetattr = Int32 Function(Int32 __fd, Pointer<termios> __termios_p);
 typedef _dart_tcgetattr = int Function(int __fd, Pointer<termios> __termios_p);
 
+typedef _c_cfmakeraw = Void Function(Pointer<termios> __termios_p);
+typedef _dart_cfmakeraw = void Function(Pointer<termios> __termios_p);
+
 typedef _c_tcsetattr =
     Int32 Function(
       Int32 __fd,
@@ -110,6 +113,13 @@ typedef _dart_perror = void Function(Pointer<Utf8> s);
 typedef _c_close = Int32 Function(Int32 fd);
 typedef _dart_close = int Function(int fd);
 
+typedef _c_close_range =
+    Int32 Function(Uint32 first, Uint32 last, Uint32 flags);
+typedef _dart_close_range = int Function(int first, int last, int flags);
+
+typedef _c_closefrom = Void Function(Int32 lowfd);
+typedef _dart_closefrom = void Function(int lowfd);
+
 typedef _c_putenv = Int32 Function(Pointer<Int8> string);
 typedef _dart_putenv = int Function(Pointer<Int8> string);
 
@@ -146,6 +156,11 @@ class Unix {
     unlockpt = lib.lookupFunction<_c_unlockpt, _dart_unlockpt>('unlockpt');
     tcgetattr = lib.lookupFunction<_c_tcgetattr, _dart_tcgetattr>('tcgetattr');
     tcsetattr = lib.lookupFunction<_c_tcsetattr, _dart_tcsetattr>('tcsetattr');
+    if (lib.providesSymbol('cfmakeraw')) {
+      cfmakeraw = lib.lookupFunction<_c_cfmakeraw, _dart_cfmakeraw>(
+        'cfmakeraw',
+      );
+    }
     fork = lib.lookupFunction<_c_fork, _dart_fork>('fork');
     setsid = lib.lookupFunction<_c_setsid, _dart_setsid>('setsid');
     ptsname = lib.lookupFunction<_c_ptsname, _dart_ptsname>('ptsname');
@@ -161,6 +176,18 @@ class Unix {
     fcntl3 = lib.lookupFunction<_c_fcntl3, _dart_fcntl3>('fcntl');
     perror = lib.lookupFunction<_c_perror, _dart_perror>('perror');
     close = lib.lookupFunction<_c_close, _dart_close>('close');
+
+    try {
+      close_range = lib.lookupFunction<_c_close_range, _dart_close_range>(
+        'close_range',
+      );
+    } catch (_) {}
+
+    try {
+      closefrom = lib.lookupFunction<_c_closefrom, _dart_closefrom>(
+        'closefrom',
+      );
+    } catch (_) {}
     putenv = lib.lookupFunction<_c_putenv, _dart_putenv>('putenv');
     setenv = lib.lookupFunction<_c_setenv, _dart_setenv>('setenv');
     chdir = lib.lookupFunction<_c_chdir, _dart_chdir>('chdir');
@@ -179,6 +206,7 @@ class Unix {
   late final _dart_unlockpt unlockpt;
   late final _dart_tcgetattr tcgetattr;
   late final _dart_tcsetattr tcsetattr;
+  _dart_cfmakeraw? cfmakeraw;
   late final _dart_fork fork;
   late final _dart_setsid setsid;
   late final _dart_ptsname ptsname;
@@ -195,6 +223,8 @@ class Unix {
   late final _dart_fcntl3 fcntl3;
   late final _dart_perror perror;
   late final _dart_close close;
+  _dart_close_range? close_range;
+  _dart_closefrom? closefrom;
   late final _dart_putenv putenv;
   late final _dart_setenv setenv;
   late final _dart_chdir chdir;

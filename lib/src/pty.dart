@@ -149,7 +149,6 @@ void _readUntilExit(_IsolateArgs<PtyCoreWorker> ctx) async {
       final data = ctx.arg.read();
 
       if (data == null) {
-        // print('data == null?');
         await input.close();
         break;
       }
@@ -166,6 +165,7 @@ void _readUntilExit(_IsolateArgs<PtyCoreWorker> ctx) async {
     }
   } finally {
     ctx.arg.free();
+    rp.close();
   }
   await loopController.close();
   ctx.sendPort.send(null);

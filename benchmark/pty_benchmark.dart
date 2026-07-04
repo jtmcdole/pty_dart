@@ -19,7 +19,7 @@ void main() async {
     if (Platform.isWindows) {
       PtyCoreWindows.forceLegacyForTesting = legacy;
     }
-    final pty = PseudoTerminal.start(execFile.absolute.path, []);
+    final pty = PseudoTerminal.start(execFile.absolute.path, [], raw: true);
 
     int receivedBytes = 0;
     pty.out.listen((data) {
