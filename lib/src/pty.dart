@@ -33,130 +33,6 @@ abstract class BasePseudoTerminal implements PseudoTerminal {
   }
 }
 
-/// A polling based PseudoTerminal implementation. Mainly used in flutter debug
-/// mode to make hot reload work. The underlying PtyCore must be non-blocking.
-class PollingPseudoTerminal extends BasePseudoTerminal {
-  PollingPseudoTerminal(super._core);
-
-  //initialize them late to avoid having any closures in the instance
-  //so that this PollingPseudoTerminal can be passed to an Isolate
-  late final Completer<int> _exitCode = Completer<int>();
-  late StreamController<String> _out;
-  bool _initialized = false;
-
-  @override
-  void init() {
-    _out = StreamController<String>();
-    _initialized = true;
-    Timer.run(() {
-      _poll();
-    });
-  }
-
-  List<int> _createDelayMicrosecondsStepList(
-    Map<int, int> delayMicrosecondsToAmountMap,
-  ) {
-    final result = List<int>.empty(growable: true);
-    final sortedKeys = delayMicrosecondsToAmountMap.keys.toList(growable: false)
-      ..sort();
-    for (final key in sortedKeys) {
-      result.addAll(List<int>.filled(delayMicrosecondsToAmountMap[key]!, key));
-    }
-    return result;
-  }
-
-  void _poll() async {
-    final delayMicrosecondsSteps = _createDelayMicrosecondsStepList({
-      200: 50,
-      500: 50,
-      1000: 50,
-      2000: 50,
-      3000: 40,
-      4000: 30,
-      5000: 20,
-      10000: 10,
-      20000: 5,
-      50000: 2,
-      70000: 1,
-      100000: 1,
-    });
-
-    var delayStepIndex = 0;
-
-    var exitCodeCheckNeeded = true;
-
-    final rawDataBuffer = <Uint8List>[];
-
-    while (true) {
-      if (exitCodeCheckNeeded) {
-        final exit = _core.exitCodeNonBlocking();
-        if (exit != null) {
-          _exitCode.complete(exit);
-          await _out.close();
-          return;
-        }
-        exitCodeCheckNeeded = false;
-        Timer(Duration(milliseconds: 500), () {
-          exitCodeCheckNeeded = true;
-        });
-      }
-
-      var receivedSomething = false;
-
-      var data = _core.read();
-      while (data != null) {
-        receivedSomething = true;
-        rawDataBuffer.add(data);
-        data = _core.read();
-      }
-      if (!receivedSomething) {
-        // when we did not receive anything then we increase the delay time
-        if (delayStepIndex < delayMicrosecondsSteps.length - 1) {
-          delayStepIndex++;
-        }
-      } else {
-        //when we received something we jump to the lowest delay time
-        delayStepIndex = 0;
-      }
-
-      if (_initialized) {
-        if (rawDataBuffer.isNotEmpty) {
-          try {
-            for (final bytes in rawDataBuffer) {
-              final utf = utf8.decode(bytes, allowMalformed: true);
-              _out.add(utf);
-            }
-            rawDataBuffer.clear();
-          } on FormatException catch (_) {
-            // FormatException is thrown when the data contains incomplete
-            // UTF-8 byte sequences.
-            // int this case we do nothing and wait for the next chunk of data
-            // to arrive
-          }
-        }
-      }
-      await Future.delayed(
-        Duration(microseconds: delayMicrosecondsSteps[delayStepIndex]),
-      );
-    }
-  }
-
-  @override
-  Future<int> get exitCode {
-    return _exitCode.future;
-  }
-
-  @override
-  Stream<String> get out {
-    return _out.stream;
-  }
-
-  @override
-  void ackProcessed() {
-    // NOOP
-  }
-}
-
 /// An isolate based PseudoTerminal implementation. Performs better than
 /// PollingPseudoTerminal and requires less resource. However this prevents
 /// flutter hot reload from working. Ideal for release builds. The underlying
@@ -178,7 +54,7 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
     final exitPort = ReceivePort();
     Isolate.spawn(
       _waitForExitCode,
-      _IsolateArgs(exitPort.sendPort, _core, _syncProcessed),
+      _IsolateArgs(exitPort.sendPort, _core.worker, _syncProcessed),
     );
     _exitCodeFuture = exitPort.first.then((value) {
       exitPort.close();
@@ -214,7 +90,7 @@ class BlockingPseudoTerminal extends BasePseudoTerminal {
     });
     Isolate.spawn(
       _readUntilExit,
-      _IsolateArgs(receivePort.sendPort, _core, _syncProcessed),
+      _IsolateArgs(receivePort.sendPort, _core.worker, _syncProcessed),
     );
   }
 
@@ -243,12 +119,12 @@ class _IsolateArgs<T> {
   final bool syncProcessed;
 }
 
-void _waitForExitCode(_IsolateArgs<PtyCore> ctx) async {
+void _waitForExitCode(_IsolateArgs<PtyCoreWorker> ctx) async {
   final exitCode = ctx.arg.exitCodeBlocking();
   ctx.sendPort.send(exitCode);
 }
 
-void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
+void _readUntilExit(_IsolateArgs<PtyCoreWorker> ctx) async {
   final rp = ReceivePort();
   ctx.sendPort.send(rp.sendPort);
 
@@ -268,24 +144,28 @@ void _readUntilExit(_IsolateArgs<PtyCore> ctx) async {
   }
   loopController.sink.add(true); //enable the first iteration
 
-  await for (final _ in loopController.stream) {
-    final data = ctx.arg.read();
+  try {
+    await for (final _ in loopController.stream) {
+      final data = ctx.arg.read();
 
-    if (data == null) {
-      // print('data == null?');
-      await input.close();
-      break;
+      if (data == null) {
+        // print('data == null?');
+        await input.close();
+        break;
+      }
+
+      input.sink.add(data);
+
+      // when we don't sync with the data processing then just schedule the next loop
+      // iteration
+      // Otherwise the loop will continue when the processing of the data is
+      // finished (signaled via [PseudoTerminal.ackProcessed])
+      if (!ctx.syncProcessed) {
+        loopController.sink.add(true);
+      }
     }
-
-    input.sink.add(data);
-
-    // when we don't sync with the data processing then just schedule the next loop
-    // iteration
-    // Otherwise the loop will continue when the processing of the data is
-    // finished (signaled via [PseudoTerminal.ackProcessed])
-    if (!ctx.syncProcessed) {
-      loopController.sink.add(true);
-    }
+  } finally {
+    ctx.arg.free();
   }
   await loopController.close();
   ctx.sendPort.send(null);

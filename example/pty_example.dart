@@ -9,8 +9,7 @@ void main() async {
   final pty = PseudoTerminal.start(
     Platform.isWindows ? 'pwsh.exe' : 'bash',
     [],
-    environment: {'codefu': '1234'},
-    blocking: true,
+    environment: Platform.environment,
   );
 
   pty.resize(120, 40);
