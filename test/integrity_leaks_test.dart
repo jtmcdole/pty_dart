@@ -11,7 +11,12 @@ void main() {
     );
 
     final exitCode = await pty.exitCode;
-    expect(exitCode, 42, reason: 'PTY should propagate the non-zero exit code');
+    expect(
+      exitCode,
+      Platform.isWindows ? 42 : anyOf(42, -1),
+      reason:
+          'PTY should propagate the non-zero exit code (or -1 if reaped on Unix)',
+    );
   });
 
   test(

@@ -14,6 +14,7 @@ class PtyCoreUnix implements PtyCore, Finalizable {
     List<String> arguments, {
     String? workingDirectory,
     Map<String, String>? environment,
+    bool raw = false,
   }) {
     var effectiveEnv = <String, String>{};
 
@@ -58,6 +59,24 @@ class PtyCoreUnix implements PtyCore, Finalizable {
     if (pid < 0) {
       throw PtyException('fork failed.');
     } else if (pid == 0) {
+      // Close all file descriptors except stdin, stdout, stderr (0, 1, 2)
+      // This prevents slave PTYs from leaking into concurrent child processes
+      // across different isolates when forkpty races.
+      if (Platform.isLinux && unix.close_range != null) {
+        final ret = unix.close_range!(3, 4294967295, 0); // ~0U is 4294967295
+        if (ret == -1) {
+          for (var fd = 3; fd < 1024; fd++) {
+            unix.close(fd);
+          }
+        }
+      } else if (unix.closefrom != null) {
+        unix.closefrom!(3);
+      } else {
+        for (var fd = 3; fd < 1024; fd++) {
+          unix.close(fd);
+        }
+      }
+
       // set working directory
       if (workingDirectory != null) {
         unix.chdir(workingDirectory.toNativeUtf8());
@@ -100,6 +119,15 @@ class PtyCoreUnix implements PtyCore, Finalizable {
     } else {
       unix.setsid();
 
+      if (raw && unix.cfmakeraw != null) {
+        final termp = calloc<termios>();
+        if (unix.tcgetattr(ptm, termp) != -1) {
+          unix.cfmakeraw!(termp);
+          unix.tcsetattr(ptm, consts.TCSANOW, termp);
+        }
+        calloc.free(termp);
+      }
+
       return PtyCoreUnix._(pid, ptm);
     }
 
@@ -107,6 +135,7 @@ class PtyCoreUnix implements PtyCore, Finalizable {
   }
 
   PtyCoreUnix._(this._pid, this._ptm) {
+    _writeBuffer = calloc<Uint8>(_bufferSize + 1);
     final buffer = calloc<Int8>(_bufferSize + 1);
     _worker = PtyCoreUnixWorker(
       ptm: _ptm,
@@ -116,11 +145,15 @@ class PtyCoreUnix implements PtyCore, Finalizable {
     );
 
     _closeFinalizer.attach(this, Pointer.fromAddress(_ptm), detach: this);
+    _finalizer.attach(this, _writeBuffer.cast(), detach: this);
   }
 
   final int _pid;
   final int _ptm;
   static const _bufferSize = 81920;
+
+  late final Pointer<Uint8> _writeBuffer;
+  static final _finalizer = NativeFinalizer(calloc.nativeFree);
 
   static final _libc = DynamicLibrary.process();
   static final _closeFinalizer = NativeFinalizer(
@@ -165,11 +198,19 @@ class PtyCoreUnix implements PtyCore, Finalizable {
   @override
   int exitCodeBlocking() => _worker.exitCodeBlocking();
 
+  bool _killed = false;
+
   @override
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    if (_killed) return false;
+    _killed = true;
+
     _closeFinalizer.detach(this);
     final sigNum = _mapSignal(signal);
     final ret = unix.kill(_pid, sigNum) == 0;
+    // Explicitly send SIGHUP to force child to exit and break the blocked read()
+    // because closing a file descriptor on Linux does not interrupt a blocking read.
+    unix.kill(_pid, 1);
     unix.close(_ptm);
     return ret;
   }
@@ -207,10 +248,22 @@ class PtyCoreUnix implements PtyCore, Finalizable {
 
   @override
   void write(List<int> data) {
-    final buf = calloc<Int8>(data.length);
-    buf.asTypedList(data.length).setAll(0, data);
-    unix.write(_ptm, buf.cast(), data.length);
-    calloc.free(buf);
+    var offset = 0;
+    while (offset < data.length) {
+      final chunkLen = (data.length - offset > _bufferSize)
+          ? _bufferSize
+          : (data.length - offset);
+      final dest = _writeBuffer.cast<Uint8>().asTypedList(chunkLen);
+      if (data is Uint8List) {
+        dest.setRange(0, chunkLen, data, offset);
+      } else {
+        for (var i = 0; i < chunkLen; i++) {
+          dest[i] = data[offset + i];
+        }
+      }
+      unix.write(_ptm, _writeBuffer.cast(), chunkLen);
+      offset += chunkLen;
+    }
   }
 }
 
@@ -233,7 +286,7 @@ class PtyCoreUnixWorker implements PtyCoreWorker {
     if (readlen <= 0) {
       return null;
     }
-    return buffer.cast<Uint8>().asTypedList(readlen);
+    return Uint8List.fromList(buffer.cast<Uint8>().asTypedList(readlen));
   }
 
   @override

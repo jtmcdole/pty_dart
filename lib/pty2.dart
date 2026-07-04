@@ -12,12 +12,19 @@ abstract class PseudoTerminal {
   /// If [blocking] is [true], the PseudoTerminal starts in blocking mode
   /// (better suited for flutter release mode), otherwise in polling mode
   /// (better suited for flutter debug mode).
+  ///
+  /// The [raw] flag puts the terminal into raw mode on Unix. By default, Unix
+  /// pseudo-terminals operate in canonical mode with ECHO enabled. This means
+  /// the kernel buffers input line-by-line and physically echoes characters back.
+  /// If you are transferring binary data, streaming high-throughput buffers, or
+  /// do not want the kernel to mangle line endings and echo data, set [raw] to true.
   static PseudoTerminal start(
     String executable,
     List<String> arguments, {
     String? workingDirectory,
     Map<String, String>? environment,
     bool ackProcessed = false,
+    bool raw = false,
     // bool includeParentEnvironment = true,
     // bool runInShell = false,
     // ProcessStartMode mode = ProcessStartMode.normal,
@@ -43,6 +50,7 @@ abstract class PseudoTerminal {
         arguments,
         workingDirectory: workingDirectory,
         environment: environment,
+        raw: raw,
       );
     }
 

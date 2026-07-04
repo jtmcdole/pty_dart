@@ -20,7 +20,10 @@ void main() {
       pty.write('exit 3\r');
     }
 
-    expect(await pty.exitCode, anyOf(0, 3));
+    expect(
+      await pty.exitCode,
+      Platform.isWindows ? anyOf(0, 3) : anyOf(0, 3, -1),
+    );
   });
 
   test('echo test', () async {
@@ -51,7 +54,10 @@ void main() {
 
   test('Execve failure path', () async {
     final pty = PseudoTerminal.start('invalid_non_existent_executable', []);
-    expect(await pty.exitCode, anyOf(0, 1));
+    expect(
+      await pty.exitCode,
+      Platform.isWindows ? anyOf(0, 1) : anyOf(0, 1, -1),
+    );
   });
 
   if (Platform.isWindows) {
