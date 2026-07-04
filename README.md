@@ -1,5 +1,8 @@
 # pty
 
+> [!WARNING]  
+> Moved to https://github.com/jtmcdole/termui/tree/main/packages/pty2
+
 Pty for Dart and Flutter. Provides the ability to create processes with pseudo terminal file descriptors.
 
 ## Status
