@@ -16,4 +16,12 @@ abstract class PtyCore {
   // int get pid;
 
   void write(List<int> data);
+
+  PtyCoreWorker get worker;
+}
+
+abstract class PtyCoreWorker {
+  Uint8List? read();
+  int exitCodeBlocking();
+  void free();
 }

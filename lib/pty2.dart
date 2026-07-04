@@ -8,6 +8,7 @@ import 'package:pty2/src/pty_core.dart';
 export 'src/pty.dart';
 
 abstract class PseudoTerminal {
+  /// Internal testing flag to allow non-blocking PTY on Windows.
   /// If [blocking] is [true], the PseudoTerminal starts in blocking mode
   /// (better suited for flutter release mode), otherwise in polling mode
   /// (better suited for flutter debug mode).
@@ -16,7 +17,6 @@ abstract class PseudoTerminal {
     List<String> arguments, {
     String? workingDirectory,
     Map<String, String>? environment,
-    bool blocking = false,
     bool ackProcessed = false,
     // bool includeParentEnvironment = true,
     // bool runInShell = false,
@@ -25,13 +25,11 @@ abstract class PseudoTerminal {
     late PtyCore core;
 
     if (Platform.isWindows) {
-      blocking = true;
       core = PtyCoreWindows.start(
         executable,
         arguments,
         workingDirectory: workingDirectory,
         environment: environment,
-        blocking: blocking,
       );
     } else {
       //add '-l' as argument for the shell to perform a login
@@ -45,17 +43,10 @@ abstract class PseudoTerminal {
         arguments,
         workingDirectory: workingDirectory,
         environment: environment,
-        blocking: blocking,
       );
     }
 
-    final BasePseudoTerminal pty;
-    if (blocking) {
-      pty = BlockingPseudoTerminal(core, ackProcessed);
-    } else {
-      pty = PollingPseudoTerminal(core);
-    }
-    return pty..init();
+    return BlockingPseudoTerminal(core, ackProcessed)..init();
   }
 
   void init();

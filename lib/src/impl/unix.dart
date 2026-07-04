@@ -8,25 +8,12 @@ import 'package:pty2/src/pty_error.dart';
 import 'package:pty2/src/util/unix_const.dart';
 import 'package:pty2/src/util/unix_ffi.dart';
 
-void _setNonblock(int fd) {
-  var flag = unix.fcntl(fd, consts.F_GETFL);
-
-  flag |= consts.O_NONBLOCK;
-
-  final ret = unix.fcntl3(fd, consts.F_SETFL, flag);
-  if (ret == -1) {
-    unix.perror(nullptr);
-    // throw PtyError('fcntl3 failed.');
-  }
-}
-
-class PtyCoreUnix implements PtyCore {
+class PtyCoreUnix implements PtyCore, Finalizable {
   factory PtyCoreUnix.start(
     String executable,
     List<String> arguments, {
     String? workingDirectory,
     Map<String, String>? environment,
-    bool blocking = false,
   }) {
     var effectiveEnv = <String, String>{};
 
@@ -112,9 +99,6 @@ class PtyCoreUnix implements PtyCore {
       unix.cExit(1);
     } else {
       unix.setsid();
-      if (!blocking) {
-        _setNonblock(ptm);
-      }
 
       return PtyCoreUnix._(pid, ptm);
     }
@@ -123,28 +107,33 @@ class PtyCoreUnix implements PtyCore {
   }
 
   PtyCoreUnix._(this._pid, this._ptm) {
-    // final devname = unix.ptsname(_ptm);
-    // _pts = unix.open(devname, consts.O_RDWR);
+    final buffer = calloc<Int8>(_bufferSize + 1);
+    _worker = PtyCoreUnixWorker(
+      ptm: _ptm,
+      pid: _pid,
+      buffer: buffer,
+      bufferSize: _bufferSize,
+    );
+
+    _closeFinalizer.attach(this, Pointer.fromAddress(_ptm), detach: this);
   }
 
   final int _pid;
   final int _ptm;
-  // late final int _pts;
-
   static const _bufferSize = 81920;
-  final _buffer = calloc<Int8>(_bufferSize + 1).address;
+
+  static final _libc = DynamicLibrary.process();
+  static final _closeFinalizer = NativeFinalizer(
+    _libc.lookup<NativeFunction<Void Function(Pointer<Void>)>>('close'),
+  );
+
+  late final PtyCoreUnixWorker _worker;
 
   @override
-  Uint8List? read() {
-    final buffer = Pointer.fromAddress(_buffer);
-    final readlen = unix.read(_ptm, buffer.cast(), _bufferSize);
+  PtyCoreUnixWorker get worker => _worker;
 
-    if (readlen <= 0) {
-      return null;
-    }
-
-    return buffer.cast<Uint8>().asTypedList(readlen);
-  }
+  @override
+  Uint8List? read() => _worker.read();
 
   @override
   int? exitCodeNonBlocking() {
@@ -158,7 +147,12 @@ class PtyCoreUnix implements PtyCore {
       return null;
     }
     if (pid < 0) {
-      return 0; // ECHILD: Dart VM's global SIGCHLD handler stole the status
+      // ECHILD: VM reaped the status
+      final isDead = unix.kill(_pid, 0) != 0;
+      if (isDead) {
+        return -1;
+      }
+      return null;
     }
 
     if ((status & 0x7F) != 0) {
@@ -169,27 +163,25 @@ class PtyCoreUnix implements PtyCore {
   }
 
   @override
-  int exitCodeBlocking() {
-    final statusPointer = calloc<Int32>();
-    final pid = unix.waitpid(_pid, statusPointer, 0);
-
-    final status = statusPointer.value;
-    calloc.free(statusPointer);
-
-    if (pid < 0) {
-      return 0; // ECHILD: Dart VM's global SIGCHLD handler stole the status
-    }
-
-    if ((status & 0x7F) != 0) {
-      // killed by signal
-      return 128 + (status & 0x7F);
-    }
-    return (status & 0xFF00) >> 8;
-  }
+  int exitCodeBlocking() => _worker.exitCodeBlocking();
 
   @override
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
-    return unix.kill(_pid, consts.SIGKILL) == 0;
+    _closeFinalizer.detach(this);
+    final sigNum = _mapSignal(signal);
+    final ret = unix.kill(_pid, sigNum) == 0;
+    unix.close(_ptm);
+    return ret;
+  }
+
+  int _mapSignal(ProcessSignal signal) {
+    if (signal == ProcessSignal.sigterm) return 15;
+    if (signal == ProcessSignal.sigkill) return 9;
+    if (signal == ProcessSignal.sighup) return 1;
+    if (signal == ProcessSignal.sigint) return 2;
+    if (signal == ProcessSignal.sigusr1) return 10;
+    if (signal == ProcessSignal.sigusr2) return 12;
+    return 15;
   }
 
   @override
@@ -219,5 +211,55 @@ class PtyCoreUnix implements PtyCore {
     buf.asTypedList(data.length).setAll(0, data);
     unix.write(_ptm, buf.cast(), data.length);
     calloc.free(buf);
+  }
+}
+
+class PtyCoreUnixWorker implements PtyCoreWorker {
+  final int ptm;
+  final int pid;
+  final Pointer<Int8> buffer;
+  final int bufferSize;
+
+  PtyCoreUnixWorker({
+    required this.ptm,
+    required this.pid,
+    required this.buffer,
+    required this.bufferSize,
+  });
+
+  @override
+  Uint8List? read() {
+    final readlen = unix.read(ptm, buffer.cast(), bufferSize);
+    if (readlen <= 0) {
+      return null;
+    }
+    return buffer.cast<Uint8>().asTypedList(readlen);
+  }
+
+  @override
+  int exitCodeBlocking() {
+    final statusPointer = calloc<Int32>();
+    final pidResult = unix.waitpid(pid, statusPointer, 0);
+
+    final status = statusPointer.value;
+    calloc.free(statusPointer);
+
+    if (pidResult < 0) {
+      // ECHILD: VM reaped it
+      final isDead = unix.kill(pid, 0) != 0;
+      if (isDead) {
+        return -1;
+      }
+    }
+
+    if ((status & 0x7F) != 0) {
+      return 128 + (status & 0x7F);
+    }
+    return (status & 0xFF00) >> 8;
+  }
+
+  @override
+  void free() {
+    calloc.free(buffer);
   }
 }
